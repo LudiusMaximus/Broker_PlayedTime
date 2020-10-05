@@ -1,13 +1,1 @@
-# Miscellaneous ------------------------------------------------------------#
-
-*.bak
-*.bat
-*.ods
-.svn/
 Libs/
-
-# Windows garbage ----------------------------------------------------------#
-
-Desktop.ini
-ehthumbs.db
-Thumbs.db
