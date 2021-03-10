@@ -32,9 +32,9 @@ if CURRENT_LOCALE == "enUS" then return end
 if CURRENT_LOCALE == "deDE" then
 
 L["Character levels"] = "Charakterstufen"
-L["Class icons"] = "Klassensymbolen"
+L["Class icons"] = "Klassensymbole"
 L["Current realm only"] = "Nur das aktuelle Realm"
-L["Faction icons"] = "Fraktionsymbolen"
+L["Faction icons"] = "Fraktionsymbole"
 L["Remove character"] = "Charakter entfernen"
 L["Total"] = "Gesamt"
 
