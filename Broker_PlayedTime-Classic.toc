@@ -1,0 +1,25 @@
+## Interface: 11307
+## Version: @project-version@
+## Title: Broker: Played Time
+## Author: Phanx, LudiusMaximus
+## Notes: DataBroker plugin to track played time across all your characters.
+## Notes-deDE: DataBroker-Plugin, um die gesamt gespielte Zeit deiner Charaktere zu verfolgen.
+## Notes-esES: Plugin DataBroker para seguir el tiempo jugado en todos los personajes.
+## Notes-esMX: Plugin DataBroker para seguir el tiempo jugó en todos los personajes.
+## Notes-ptBR: Plugin DataBroker para seguir o tempo jogado em todos os personagens.
+
+## SavedVariables: BrokerPlayedTimeDB
+
+## X-Curse-Project-ID: 23496
+## X-WoWI-ID: 16711
+
+## X-Donate: PayPal:ludiusmaximus@gmail.com
+## X-License: The MIT License (MIT)
+
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+
+Localization.lua
+Addon.lua
