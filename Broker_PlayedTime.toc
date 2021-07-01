@@ -1,4 +1,4 @@
-## Interface: 90005
+## Interface: 90100
 ## Version: @project-version@
 ## Title: Broker: Played Time
 ## Author: Phanx, LudiusMaximus
