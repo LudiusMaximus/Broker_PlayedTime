@@ -49,7 +49,14 @@ do
 	function FormatTime(t, noMinutes)
 		if not t then return end
 
-		local d, h, m = floor(t / 86400), floor((t % 86400) / 3600), floor((t % 3600) / 60)
+		local d, h, m
+
+		if db.onlyHours then
+			d, h, m = 0, floor(t / 3600), floor((t % 3600) / 60)
+		else
+			d, h, m = floor(t / 86400), floor((t % 86400) / 3600), floor((t % 3600) / 60)
+		end
+
 		if d > 0 then
 			return noMinutes and format(DH, d, h) or format(DHM, d, h, m)
 		elseif h > 0 then
@@ -62,15 +69,33 @@ end
 
 ------------------------------------------------------------------------
 
+-- Dirty way to pass currently sorting realm and faction to the SortPlayers.
+local currentlySortingRealm = nil
+local currentlySortingFaction = nil
+
 local BuildSortedLists
 do
 	local function SortPlayers(a, b)
-		if a == currentPlayer then
-			return true
-		elseif b == currentPlayer then
-			return false
+	
+		if db.currentPlayerOnTop then
+			if a == currentPlayer then
+				return true
+			elseif b == currentPlayer then
+				return false
+			end
 		end
-		return a < b
+		
+		if db.sortByPlayedTime then
+			local timePlayedA = db[currentlySortingRealm][currentlySortingFaction][a].timePlayed
+			local timePlayedB = db[currentlySortingRealm][currentlySortingFaction][b].timePlayed
+			return timePlayedA > timePlayedB
+		elseif db.sortByLevel then
+			local levelA = db[currentlySortingRealm][currentlySortingFaction][a].level
+			local levelB = db[currentlySortingRealm][currentlySortingFaction][b].level
+			return levelA > levelB
+		else
+			return a < b
+		end
 	end
 
 	local function SortRealms(a, b)
@@ -89,15 +114,16 @@ do
 				tinsert(sortedRealms, realm)
 				sortedPlayers[realm] = wipe(sortedPlayers[realm] or {})
 				for faction in pairs(db[realm]) do
+
+					currentlySortingRealm = realm
+					currentlySortingFaction = faction
+
 					sortedPlayers[realm][faction] = wipe(sortedPlayers[realm][faction] or {})
 					for name in pairs(db[realm][faction]) do
 						tinsert(sortedPlayers[realm][faction], name)
 					end
-					if realm == currentRealm and faction == currentFaction then
-						sort(sortedPlayers[realm][faction], SortPlayers)
-					else
-						sort(sortedPlayers[realm][faction])
-					end
+					sort(sortedPlayers[realm][faction], SortPlayers)
+
 				end
 			end
 		end
@@ -107,7 +133,7 @@ end
 
 ------------------------------------------------------------------------
 
--- https://de.wowhead.com/guides/shadowlands-leveling-changes-level-squish
+-- https://www.wowhead.com/guide/shadowlands-leveling-changes-level-squish
 local squishTable = {
 	 1, --   1
 
@@ -325,6 +351,13 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 		factionIcons = false,
 		levels = false,
 		onlyCurrentRealm = false,
+		
+		sortByPlayedTime = false,
+		sortByLevel = false,
+		currentPlayerOnTop = true,
+		highlightCurrentPlayer = false,
+		onlyHours = false,
+		
 		[currentRealm] = {
 			[currentFaction] = {
 				[currentPlayer] = {
@@ -423,6 +456,43 @@ BrokerPlayedTimeMenu.SetFactionIcons = function() db.factionIcons = not db.facti
 BrokerPlayedTimeMenu.GetLevels = function() return db.levels end
 BrokerPlayedTimeMenu.SetLevels = function() db.levels = not db.levels end
 
+
+BrokerPlayedTimeMenu.GetSortAlphabetically = function() return not db.sortByPlayedTime and not db.sortByLevel end
+BrokerPlayedTimeMenu.SetSortAlphabetically = function()
+	db.sortByPlayedTime = false
+	db.sortByLevel = false
+	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+BrokerPlayedTimeMenu.GetSortByPlayedTime = function() return db.sortByPlayedTime end
+BrokerPlayedTimeMenu.SetSortByPlayedTime = function()
+	db.sortByPlayedTime = true
+	db.sortByLevel = false
+	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+BrokerPlayedTimeMenu.GetSortByLevel = function() return db.sortByLevel end
+BrokerPlayedTimeMenu.SetSortByLevel = function()
+	db.sortByPlayedTime = false
+	db.sortByLevel = true
+	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+BrokerPlayedTimeMenu.GetCurrentPlayerOnTop = function() return db.currentPlayerOnTop end
+BrokerPlayedTimeMenu.SetCurrentPlayerOnTop = function()
+	db.currentPlayerOnTop = not db.currentPlayerOnTop
+	BuildSortedLists()
+end
+
+BrokerPlayedTimeMenu.GetHighlightCurrentPlayer = function() return db.highlightCurrentPlayer end
+BrokerPlayedTimeMenu.SetHighlightCurrentPlayer = function() db.highlightCurrentPlayer = not db.highlightCurrentPlayer end
+
+BrokerPlayedTimeMenu.GetOnlyHours = function() return db.onlyHours end
+BrokerPlayedTimeMenu.SetOnlyHours = function() db.onlyHours = not db.onlyHours end
+
 BrokerPlayedTimeMenu.GetHideOtherRealms = function() return db.onlyCurrentRealm end
 BrokerPlayedTimeMenu.SetHideOtherRealms = function()
 	db.onlyCurrentRealm = not db.onlyCurrentRealm
@@ -476,6 +546,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		wipe(self.info)
 
 		info.text = L["Character levels"]
+		info.isNotRadio = 1
 		info.checked = self.GetLevels
 		info.func = self.SetLevels
 		info.keepShownOnClick = 1
@@ -483,6 +554,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		wipe(self.info)
 
 		info.text = L["Class icons"]
+		info.isNotRadio = 1
 		info.checked = self.GetClassIcons
 		info.func = self.SetClassIcons
 		info.keepShownOnClick = 1
@@ -490,6 +562,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		wipe(self.info)
 
 		info.text = L["Faction icons"]
+		info.isNotRadio = 1
 		info.keepShownOnClick = 1
 		info.checked = self.GetFactionIcons
 		info.func = self.SetFactionIcons
@@ -503,9 +576,67 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		wipe(self.info)
 
 		info.text = L["Current realm only"]
+		info.isNotRadio = 1
 		info.keepShownOnClick = 1
 		info.checked = self.GetHideOtherRealms
 		info.func = self.SetHideOtherRealms
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+		info.text = " "
+		info.disabled = 1
+		info.notCheckable = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+		info.text = L["Sort alphabetically"]
+		info.checked = self.GetSortAlphabetically
+		info.func = self.SetSortAlphabetically
+		info.keepShownOnClick = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+		info.text = L["Sort by played time"]
+		info.checked = self.GetSortByPlayedTime
+		info.func = self.SetSortByPlayedTime
+		info.keepShownOnClick = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+		
+		info.text = L["Sort by level"]
+		info.checked = self.GetSortByLevel
+		info.func = self.SetSortByLevel
+		info.keepShownOnClick = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+		
+		info.text = L["Current player on top"]
+		info.isNotRadio = 1
+		info.checked = self.GetCurrentPlayerOnTop
+		info.func = self.SetCurrentPlayerOnTop
+		info.keepShownOnClick = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+		
+		info.text = L["Current player highlighted"]
+		info.isNotRadio = 1
+		info.checked = self.GetHighlightCurrentPlayer
+		info.func = self.SetHighlightCurrentPlayer
+		info.keepShownOnClick = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+		info.text = " "
+		info.disabled = 1
+		info.notCheckable = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+		info.text = L["Time in hours (not days)"]
+		info.isNotRadio = 1
+		info.checked = self.GetOnlyHours
+		info.func = self.SetOnlyHours
+		info.keepShownOnClick = 1
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
@@ -604,6 +735,11 @@ local function OnTooltipShow(tooltip)
 						local t
 						if realm == currentRealm and name == currentPlayer then
 							t = data.timePlayed + time() - data.timeUpdated
+
+							if db.highlightCurrentPlayer then
+								name = "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:14|t" .. name
+							end
+
 						else
 							t = data.timePlayed
 						end
