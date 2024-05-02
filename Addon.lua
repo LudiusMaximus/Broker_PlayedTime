@@ -2,9 +2,10 @@
 	Broker_PlayedTime
 	DataBroker plugin to track played time across all your characters.
 	Copyright (c) 2010-2016 Phanx <addons@phanx.net>. All rights reserved.
-	http://www.wowinterface.com/downloads/info16711-BrokerPlayedTime.html
-	https://mods.curse.com/addons/wow/broker-playedtime
-	https://github.com/Phanx/Broker_PlayedTime
+	Copyright (c) 2020-2024 Ludius <ludiusmaximus@gmail.com>. All rights reserved.
+	https://www.wowinterface.com/downloads/info16711-BrokerPlayedTime.html
+	https://www.curseforge.com/wow/addons/broker-playedtime
+	https://github.com/LudiusMaximus/Broker_PlayedTime
 ----------------------------------------------------------------------]]
 
 local ADDON, L = ...
@@ -13,7 +14,7 @@ local floor, format, gsub, ipairs, pairs, sort, tinsert, type, wipe = floor, for
 
 local db, myDB
 local timePlayed, timeUpdated = 0, 0
-local sortedFactions, sortedPlayers, sortedRealms = { "Horde", "Alliance" }, {}, {}
+local sortedFactions, sortedPlayers, sortedPlayersNoFactions, sortedRealms = { "Horde", "Alliance" }, {}, {}, {}
 
 local currentFaction = UnitFactionGroup("player")
 local currentPlayer = UnitName("player")
@@ -69,14 +70,16 @@ end
 
 ------------------------------------------------------------------------
 
--- Dirty way to pass currently sorting realm and faction to the SortPlayers.
+-- Dirty way to pass currently sorting realm to the SortPlayers.
 local currentlySortingRealm = nil
-local currentlySortingFaction = nil
+
+
+local mapPlayerToFaction = {}
 
 local BuildSortedLists
 do
 	local function SortPlayers(a, b)
-	
+
 		if db.currentPlayerOnTop then
 			if a == currentPlayer then
 				return true
@@ -84,14 +87,14 @@ do
 				return false
 			end
 		end
-		
+
 		if db.sortByPlayedTime then
-			local timePlayedA = db[currentlySortingRealm][currentlySortingFaction][a].timePlayed
-			local timePlayedB = db[currentlySortingRealm][currentlySortingFaction][b].timePlayed
+			local timePlayedA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].timePlayed
+			local timePlayedB = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][b]][b].timePlayed
 			return timePlayedA > timePlayedB
 		elseif db.sortByLevel then
-			local levelA = db[currentlySortingRealm][currentlySortingFaction][a].level
-			local levelB = db[currentlySortingRealm][currentlySortingFaction][b].level
+			local levelA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].level
+			local levelB = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][b]][b].level
 			return levelA > levelB
 		else
 			return a < b
@@ -113,18 +116,22 @@ do
 			if type(db[realm]) == "table" and (realm == currentRealm or not db.onlyCurrentRealm) then
 				tinsert(sortedRealms, realm)
 				sortedPlayers[realm] = wipe(sortedPlayers[realm] or {})
+				sortedPlayersNoFactions[realm] = wipe(sortedPlayersNoFactions[realm] or {})
+				
+				currentlySortingRealm = realm
+				
 				for faction in pairs(db[realm]) do
-
-					currentlySortingRealm = realm
-					currentlySortingFaction = faction
-
+					
 					sortedPlayers[realm][faction] = wipe(sortedPlayers[realm][faction] or {})
 					for name in pairs(db[realm][faction]) do
 						tinsert(sortedPlayers[realm][faction], name)
+						tinsert(sortedPlayersNoFactions[realm], name)
 					end
 					sort(sortedPlayers[realm][faction], SortPlayers)
 
 				end
+				sort(sortedPlayersNoFactions[realm], SortPlayers)
+				
 			end
 		end
 		sort(sortedRealms, SortRealms)
@@ -351,13 +358,14 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 		factionIcons = false,
 		levels = false,
 		onlyCurrentRealm = false,
-		
+
 		sortByPlayedTime = false,
 		sortByLevel = false,
 		currentPlayerOnTop = true,
 		highlightCurrentPlayer = false,
+		groupByFactions = true,
 		onlyHours = false,
-		
+
 		[currentRealm] = {
 			[currentFaction] = {
 				[currentPlayer] = {
@@ -376,10 +384,23 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 	myDB = db[currentRealm][currentFaction][currentPlayer]
 
 
+	wipe(mapPlayerToFaction)
+	for realm in pairs(db) do
+		if type(db[realm]) == "table" then
+			mapPlayerToFaction[realm] = {}
+			for faction in pairs(db[realm]) do
+				for name in pairs(db[realm][faction]) do
+					mapPlayerToFaction[realm][name] = faction
+				end
+			end
+		end
+	end
+
+
 	PerformLevelSquish()
 
-
 	BuildSortedLists()
+	
 
 	if CUSTOM_CLASS_COLORS then
 		local function UpdateClassColors()
@@ -403,6 +424,7 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 	myDB.level = UnitLevel("player")
 
 	self:UpdateTimePlayed()
+
 end
 
 local requesting
@@ -480,6 +502,9 @@ BrokerPlayedTimeMenu.SetSortByLevel = function()
 	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
 	BuildSortedLists()
 end
+
+BrokerPlayedTimeMenu.GetGroupByFactions = function() return db.groupByFactions end
+BrokerPlayedTimeMenu.SetGroupByFactions = function() db.groupByFactions = not db.groupByFactions end
 
 BrokerPlayedTimeMenu.GetCurrentPlayerOnTop = function() return db.currentPlayerOnTop end
 BrokerPlayedTimeMenu.SetCurrentPlayerOnTop = function()
@@ -602,14 +627,22 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		info.keepShownOnClick = 1
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
-		
+
 		info.text = L["Sort by level"]
 		info.checked = self.GetSortByLevel
 		info.func = self.SetSortByLevel
 		info.keepShownOnClick = 1
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
-		
+
+		info.text = L["Group by factions"]
+		info.isNotRadio = 1
+		info.checked = self.GetGroupByFactions
+		info.func = self.SetGroupByFactions
+		info.keepShownOnClick = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
 		info.text = L["Current player on top"]
 		info.isNotRadio = 1
 		info.checked = self.GetCurrentPlayerOnTop
@@ -617,7 +650,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		info.keepShownOnClick = 1
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
-		
+
 		info.text = L["Current player highlighted"]
 		info.isNotRadio = 1
 		info.checked = self.GetHighlightCurrentPlayer
@@ -663,6 +696,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		info.func = self.CloseDropDownMenus
 		info.notCheckable = 1
 		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
 	elseif level == 2 then
 		for _, realm in ipairs(sortedRealms) do
 			info.text = realm
@@ -671,6 +705,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 			info.keepShownOnClick = 1
 			info.notCheckable = 1
 			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
 		end
 	elseif level == 3 then
 		local factions = 0
@@ -686,11 +721,13 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 			if rfp then
 				factions = factions + 1
 
+				-- Insert a blank line.
 				if factions > 1 then
 					info.text = " "
 					info.disabled = 1
 					info.notCheckable = 1
 					UIDropDownMenu_AddButton(info, level)
+					wipe(self.info)
 				end
 
 				info.disabled = nil
@@ -698,8 +735,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 				info.text = faction
 				info.isTitle = 1
 				UIDropDownMenu_AddButton(info, level)
-
-				info.isTitle = nil
+				wipe(self.info)
 
 				for j, name in ipairs(rfp) do
 					local cdata = db[realm][faction][name]
@@ -710,6 +746,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 					info.disabled = (name == currentPlayer and realm == currentRealm)
 					info.func = self.RemoveCharacter
 					UIDropDownMenu_AddButton(info, level)
+					wipe(self.info)
 				end
 			end
 		end
@@ -717,6 +754,44 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 end
 
 ------------------------------------------------------------------------
+
+local function AddPlayerLines(tooltip, realm, names)
+	local total = 0
+	
+	if names and #names > 0 then
+		for _, name in ipairs(names) do
+			local data = db[realm][mapPlayerToFaction[realm][name]][name]
+			if data then
+				
+				if realm == currentRealm and name == currentPlayer then
+					t = data.timePlayed + time() - data.timeUpdated
+				else
+					t = data.timePlayed
+				end
+				
+				if t > 0 then
+					tooltip:AddDoubleLine(
+						format("%s%s%s%s%s%s|r",
+							db.factionIcons and factionIcons[mapPlayerToFaction[realm][name]] or "",
+							db.classIcons and classIcons[data.class] or "",
+							CLASS_COLORS[data.class] or GRAY,
+							(db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:14|t" or "",
+							name,
+							db.levels and " ("..data.level..")" or ""
+						),
+						FormatTime(t)
+					)
+				end
+				
+			end
+		end
+		
+		total = total + t
+	end
+	
+	return total
+end
+
 
 local function OnTooltipShow(tooltip)
 	local total = 0
@@ -726,35 +801,15 @@ local function OnTooltipShow(tooltip)
 		if #sortedRealms > 1 then
 			tooltip:AddLine(realm)
 		end
-		for _, faction in ipairs(sortedFactions) do
-			local nfr = sortedPlayers[realm][faction]
-			if nfr and #nfr > 0 then
-				for _, name in ipairs(nfr) do
-					local data = db[realm][faction][name]
-					if data then
-						local t
-						if realm == currentRealm and name == currentPlayer then
-							t = data.timePlayed + time() - data.timeUpdated
-
-							if db.highlightCurrentPlayer then
-								name = "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:14|t" .. name
-							end
-
-						else
-							t = data.timePlayed
-						end
-						if t > 0 then
-							if db.levels then
-								tooltip:AddDoubleLine(format("%s%s%s%s (%s)|r", db.factionIcons and factionIcons[faction] or "", db.classIcons and classIcons[data.class] or "", CLASS_COLORS[data.class] or GRAY, name, data.level), FormatTime(t))
-							else
-								tooltip:AddDoubleLine(format("%s%s%s%s|r", db.factionIcons and factionIcons[faction] or "", db.classIcons and classIcons[data.class] or "", CLASS_COLORS[data.class] or GRAY, name), FormatTime(t))
-							end
-							total = total + t
-						end
-					end
-				end
+		
+		if db.groupByFactions then
+			for _, faction in ipairs(sortedFactions) do
+				total = total + AddPlayerLines(tooltip, realm, sortedPlayers[realm][faction])
 			end
+		else
+			total = total + AddPlayerLines(tooltip, realm, sortedPlayersNoFactions[realm])
 		end
+		
 	end
 	tooltip:AddLine(" ")
 	tooltip:AddDoubleLine(L["Total"], FormatTime(total))
