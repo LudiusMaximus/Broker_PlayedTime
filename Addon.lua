@@ -117,11 +117,11 @@ do
 				tinsert(sortedRealms, realm)
 				sortedPlayers[realm] = wipe(sortedPlayers[realm] or {})
 				sortedPlayersNoFactions[realm] = wipe(sortedPlayersNoFactions[realm] or {})
-				
+
 				currentlySortingRealm = realm
-				
+
 				for faction in pairs(db[realm]) do
-					
+
 					sortedPlayers[realm][faction] = wipe(sortedPlayers[realm][faction] or {})
 					for name in pairs(db[realm][faction]) do
 						tinsert(sortedPlayers[realm][faction], name)
@@ -131,7 +131,7 @@ do
 
 				end
 				sort(sortedPlayersNoFactions[realm], SortPlayers)
-				
+
 			end
 		end
 		sort(sortedRealms, SortRealms)
@@ -400,7 +400,7 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 	PerformLevelSquish()
 
 	BuildSortedLists()
-	
+
 
 	if CUSTOM_CLASS_COLORS then
 		local function UpdateClassColors()
@@ -757,18 +757,18 @@ end
 
 local function AddPlayerLines(tooltip, realm, names)
 	local total = 0
-	
+
 	if names and #names > 0 then
 		for _, name in ipairs(names) do
 			local data = db[realm][mapPlayerToFaction[realm][name]][name]
 			if data then
-				
+
 				if realm == currentRealm and name == currentPlayer then
 					t = data.timePlayed + time() - data.timeUpdated
 				else
 					t = data.timePlayed
 				end
-				
+
 				if t > 0 then
 					tooltip:AddDoubleLine(
 						format("%s%s%s%s%s%s|r",
@@ -781,14 +781,15 @@ local function AddPlayerLines(tooltip, realm, names)
 						),
 						FormatTime(t)
 					)
+
+					total = total + t
 				end
-				
+
 			end
 		end
-		
-		total = total + t
+
 	end
-	
+
 	return total
 end
 
@@ -801,7 +802,7 @@ local function OnTooltipShow(tooltip)
 		if #sortedRealms > 1 then
 			tooltip:AddLine(realm)
 		end
-		
+
 		if db.groupByFactions then
 			for _, faction in ipairs(sortedFactions) do
 				total = total + AddPlayerLines(tooltip, realm, sortedPlayers[realm][faction])
@@ -809,8 +810,9 @@ local function OnTooltipShow(tooltip)
 		else
 			total = total + AddPlayerLines(tooltip, realm, sortedPlayersNoFactions[realm])
 		end
-		
+
 	end
+
 	tooltip:AddLine(" ")
 	tooltip:AddDoubleLine(L["Total"], FormatTime(total))
 end
