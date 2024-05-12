@@ -796,7 +796,7 @@ end
 
 local function OnTooltipShow(tooltip)
 	local total = 0
-	tooltip:AddLine(L["Time Played"])
+	tooltip:AddLine(L["Played Time"])
 	for _, realm in ipairs(sortedRealms) do
 		tooltip:AddLine(" ")
 		if #sortedRealms > 1 then

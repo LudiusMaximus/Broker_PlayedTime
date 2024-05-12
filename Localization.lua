@@ -31,6 +31,7 @@ if CURRENT_LOCALE == "enUS" then return end
 
 if CURRENT_LOCALE == "deDE" then
 
+L["Played Time"] = "Gespielte Zeit"
 L["Character levels"] = "Charakterstufen"
 L["Class icons"] = "Klassensymbole"
 L["Current realm only"] = "Nur das aktuelle Realm"
