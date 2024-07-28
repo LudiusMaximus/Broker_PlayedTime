@@ -13,7 +13,7 @@ local ADDON, L = ...
 local floor, format, gsub, ipairs, pairs, sort, tinsert, type, wipe = floor, format, gsub, ipairs, pairs, sort, tinsert, type, wipe
 
 local db, myDB
-local timePlayed, timeUpdated = 0, 0
+local timePlayed, timePlayedLevel, timeUpdated = 0, 0, 0
 local sortedFactions, sortedPlayers, sortedPlayersNoFactions, sortedRealms = { "Horde", "Alliance" }, {}, {}, {}
 
 local currentFaction = UnitFactionGroup("player")
@@ -48,7 +48,7 @@ do
 	local   M = format("|cffffffff%s|r|cffffcc00%s|r", "%d", MIN_ABBR)
 
 	function FormatTime(t, noMinutes)
-		if not t then return end
+		if not t then return "?" end
 
 		local d, h, m
 
@@ -91,6 +91,10 @@ do
 		if db.sortByPlayedTime then
 			local timePlayedA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].timePlayed
 			local timePlayedB = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][b]][b].timePlayed
+			return timePlayedA > timePlayedB
+		elseif db.sortByPlayedTimeLevel then
+			local timePlayedA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].timePlayedLevel or 0
+			local timePlayedB = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][b]][b].timePlayedLevel or 0
 			return timePlayedA > timePlayedB
 		elseif db.sortByLevel then
 			local levelA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].level
@@ -360,6 +364,7 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 		onlyCurrentRealm = false,
 
 		sortByPlayedTime = false,
+		sortByPlayedTimeLevel = false,
 		sortByLevel = false,
 		currentPlayerOnTop = true,
 		highlightCurrentPlayer = false,
@@ -372,6 +377,7 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 					class = (select(2, UnitClass("player"))),
 					level = UnitLevel("player"),
 					timePlayed = 0,
+					timePlayedLevel = 0,
 					timeUpdated = 0,
 				},
 			}
@@ -446,6 +452,7 @@ end
 function BrokerPlayedTime:SaveTimePlayed()
 	local now = time()
 	myDB.timePlayed = timePlayed + now - timeUpdated
+	myDB.timePlayedLevel = timePlayedLevel + now - timeUpdated
 	myDB.timeUpdated = now
 
 	self:UpdateText()
@@ -457,8 +464,8 @@ function BrokerPlayedTime:PLAYER_LEVEL_UP(level)
 	self:SaveTimePlayed()
 end
 
-function BrokerPlayedTime:TIME_PLAYED_MSG(t)
-	timePlayed = t
+function BrokerPlayedTime:TIME_PLAYED_MSG(t, l)
+	timePlayed, timePlayedLevel = t, l
 	timeUpdated = time()
 	self:SaveTimePlayed()
 end
@@ -479,9 +486,10 @@ BrokerPlayedTimeMenu.GetLevels = function() return db.levels end
 BrokerPlayedTimeMenu.SetLevels = function() db.levels = not db.levels end
 
 
-BrokerPlayedTimeMenu.GetSortAlphabetically = function() return not db.sortByPlayedTime and not db.sortByLevel end
+BrokerPlayedTimeMenu.GetSortAlphabetically = function() return not db.sortByPlayedTime and not db.sortByPlayedTimeLevel and not db.sortByLevel end
 BrokerPlayedTimeMenu.SetSortAlphabetically = function()
 	db.sortByPlayedTime = false
+	db.sortByPlayedTimeLevel = false
 	db.sortByLevel = false
 	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
 	BuildSortedLists()
@@ -490,6 +498,16 @@ end
 BrokerPlayedTimeMenu.GetSortByPlayedTime = function() return db.sortByPlayedTime end
 BrokerPlayedTimeMenu.SetSortByPlayedTime = function()
 	db.sortByPlayedTime = true
+	db.sortByPlayedTimeLevel = false
+	db.sortByLevel = false
+	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+BrokerPlayedTimeMenu.GetSortByPlayedTimeLevel = function() return db.sortByPlayedTimeLevel end
+BrokerPlayedTimeMenu.SetSortByPlayedTimeLevel = function()
+	db.sortByPlayedTime = false
+	db.sortByPlayedTimeLevel = true
 	db.sortByLevel = false
 	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
 	BuildSortedLists()
@@ -498,6 +516,7 @@ end
 BrokerPlayedTimeMenu.GetSortByLevel = function() return db.sortByLevel end
 BrokerPlayedTimeMenu.SetSortByLevel = function()
 	db.sortByPlayedTime = false
+	db.sortByPlayedTimeLevel = false
 	db.sortByLevel = true
 	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
 	BuildSortedLists()
@@ -624,6 +643,13 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		info.text = L["Sort by played time"]
 		info.checked = self.GetSortByPlayedTime
 		info.func = self.SetSortByPlayedTime
+		info.keepShownOnClick = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+		info.text = L["Sort by played time this level"]
+		info.checked = self.GetSortByPlayedTimeLevel
+		info.func = self.SetSortByPlayedTimeLevel
 		info.keepShownOnClick = 1
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
@@ -763,10 +789,13 @@ local function AddPlayerLines(tooltip, realm, names)
 			local data = db[realm][mapPlayerToFaction[realm][name]][name]
 			if data then
 
+				local t, l
 				if realm == currentRealm and name == currentPlayer then
-					t = data.timePlayed + time() - data.timeUpdated
+					local now = time()
+					t = data.timePlayed + now - data.timeUpdated
+					l = data.timePlayedLevel + now - data.timeUpdated
 				else
-					t = data.timePlayed
+					t, l = data.timePlayed, data.timePlayedLevel
 				end
 
 				if t > 0 then
@@ -777,7 +806,7 @@ local function AddPlayerLines(tooltip, realm, names)
 							CLASS_COLORS[data.class] or GRAY,
 							(db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:14|t" or "",
 							name,
-							db.levels and " ("..data.level..")" or ""
+							db.levels and " ("..data.level..": "..FormatTime(l, true)..")" or ""
 						),
 						FormatTime(t)
 					)
