@@ -34,28 +34,35 @@ local factionIcons = {
 		Horde = "|TInterface\\BattlefieldFrame\\Battleground-Horde:" .. textIconSize .. ":" .. textIconSize .. ":0:0:32:32:5:25:5:26|t ",
 		Neutral = "",
 	},
-	["set1"] = {
-		Alliance = "|A:AllianceSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-		Horde = "|A:HordeSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-		Neutral = "|A:CrossedFlags:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-	},
-	["set2"] = {
-		Alliance = "|A:nameplates-icon-flag-alliance:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-		Horde = "|A:nameplates-icon-flag-horde:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-		Neutral = "|A:nameplates-icon-flag-neutral:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-	},
-	["set3"] = {
-		Alliance = "|A:Warfronts-BaseMapIcons-Alliance-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
-		Horde = "|A:Warfronts-BaseMapIcons-Horde-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
-		Neutral = "|A:Warfronts-BaseMapIcons-Empty-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
-	},
 	["set4"] = {
 		Alliance = "|A:honorsystem-portrait-alliance:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
 		Horde = "|A:honorsystem-portrait-horde:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
 		Neutral = "|A:honorsystem-portrait-neutral:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
 	},
-
 }
+
+-- These icons are only available in retail.
+if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then 
+	factionIcons["set1"] = {
+		Alliance = "|A:AllianceSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+		Horde = "|A:HordeSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+		Neutral = "|A:CrossedFlags:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+	}
+	factionIcons["set2"] = {
+		Alliance = "|A:nameplates-icon-flag-alliance:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+		Horde = "|A:nameplates-icon-flag-horde:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+		Neutral = "|A:nameplates-icon-flag-neutral:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+	}
+	factionIcons["set3"] = {
+		Alliance = "|A:Warfronts-BaseMapIcons-Alliance-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
+		Horde = "|A:Warfronts-BaseMapIcons-Horde-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
+		Neutral = "|A:Warfronts-BaseMapIcons-Empty-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
+	}
+end
+
+
+
+
 
 local classIcons = {}
 for class, t in pairs(CLASS_ICON_TCOORDS) do
@@ -1007,6 +1014,10 @@ end
 
 local function OnTooltipShow(tooltip)
 
+	if not tooltipLineHeight then
+		GetTooltipLineHeight()
+	end
+	
 	-- Estimate how many tooltips we need.
 	local tooltipInitialHeight = 0
 	local initialNumLines = tooltip:NumLines()
