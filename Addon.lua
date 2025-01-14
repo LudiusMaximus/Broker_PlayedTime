@@ -2,7 +2,7 @@
 	Broker_PlayedTime
 	DataBroker plugin to track played time across all your characters.
 	Copyright (c) 2010-2016 Phanx <addons@phanx.net>. All rights reserved.
-	Copyright (c) 2020-2024 Ludius <ludiusmaximus@gmail.com>. All rights reserved.
+	Copyright (c) 2020-2025 Ludius <ludiusmaximus@gmail.com>. All rights reserved.
 	https://www.wowinterface.com/downloads/info16711-BrokerPlayedTime.html
 	https://www.curseforge.com/wow/addons/broker-playedtime
 	https://github.com/LudiusMaximus/Broker_PlayedTime
@@ -14,21 +14,53 @@ local floor, format, gsub, ipairs, pairs, sort, tinsert, type, wipe = floor, for
 
 local db, myDB
 local timePlayed, timeUpdated = 0, 0
-local sortedFactions, sortedPlayers, sortedPlayersNoFactions, sortedRealms = { "Horde", "Alliance" }, {}, {}, {}
+local sortedFactions, sortedPlayers, sortedPlayersNoFactions, sortedRealms = { "Horde", "Alliance", "Neutral" }, {}, {}, {}
 
 local currentFaction = UnitFactionGroup("player")
 local currentPlayer = UnitName("player")
 local currentRealm = GetRealmName()
 
+-- With 14 the lines get bigger than blank lines.
+local textIconSize = 13
+
 local factionIcons = {
-	Alliance = [[|TInterface\BattlefieldFrame\Battleground-Alliance:16:16:0:0:32:32:4:26:4:27|t ]],
-	Horde = [[|TInterface\BattlefieldFrame\Battleground-Horde:16:16:0:0:32:32:5:25:5:26|t ]],
+	[false] = {
+		Alliance = "",
+		Horde = "",
+		Neutral = ""
+	},
+	[true] = {
+		Alliance = "|TInterface\\BattlefieldFrame\\Battleground-Alliance:" .. textIconSize .. ":" .. textIconSize .. ":0:0:32:32:4:26:4:27|t ",
+		Horde = "|TInterface\\BattlefieldFrame\\Battleground-Horde:" .. textIconSize .. ":" .. textIconSize .. ":0:0:32:32:5:25:5:26|t ",
+		Neutral = "",
+	},
+	["set1"] = {
+		Alliance = "|A:AllianceSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+		Horde = "|A:HordeSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+		Neutral = "|A:CrossedFlags:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+	},
+	["set2"] = {
+		Alliance = "|A:nameplates-icon-flag-alliance:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+		Horde = "|A:nameplates-icon-flag-horde:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+		Neutral = "|A:nameplates-icon-flag-neutral:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+	},
+	["set3"] = {
+		Alliance = "|A:Warfronts-BaseMapIcons-Alliance-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
+		Horde = "|A:Warfronts-BaseMapIcons-Horde-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
+		Neutral = "|A:Warfronts-BaseMapIcons-Empty-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
+	},
+	["set4"] = {
+		Alliance = "|A:honorsystem-portrait-alliance:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
+		Horde = "|A:honorsystem-portrait-horde:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
+		Neutral = "|A:honorsystem-portrait-neutral:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
+	},
+
 }
 
 local classIcons = {}
 for class, t in pairs(CLASS_ICON_TCOORDS) do
 	local offset, left, right, bottom, top = 0.025, unpack(t)
-	classIcons[class] = format([[|TInterface\Glues\CharacterCreate\UI-CharacterCreate-Classes:14:14:0:0:256:256:%s:%s:%s:%s|t ]], (left + offset) * 256, (right - offset) * 256, (bottom + offset) * 256, (top - offset) * 256)
+	classIcons[class] = format("|TInterface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes:" .. textIconSize .. ":" .. textIconSize .. ":0:0:256:256:%s:%s:%s:%s|t ", (left + offset) * 256, (right - offset) * 256, (bottom + offset) * 256, (top - offset) * 256)
 end
 
 local CLASS_COLORS = { UNKNOWN = "|cffcccccc" }
@@ -68,13 +100,45 @@ do
 	end
 end
 
+
 ------------------------------------------------------------------------
 
--- Dirty way to pass currently sorting realm to the SortPlayers.
+-- Remove duplicates of this player name for different factions on the same realm.
+-- (Can happen for Pandaren, Dracthyr or Faction Change in general.)
+local function RemoveDuplicates()
+	for faction, names in pairs(db[currentRealm]) do
+		if faction ~= currentFaction then
+			for name in pairs(names) do
+				if name == currentPlayer then
+					names[name] = nil
+				end
+			end
+		end
+	end
+end
+
+
+------------------------------------------------------------------------
+
+-- Dirty way to pass currently sorting realm to the SortPlayers function.
 local currentlySortingRealm = nil
 
 
 local mapPlayerToFaction = {}
+local function BuildMapPlayerToFaction()
+	wipe(mapPlayerToFaction)
+	for realm in pairs(db) do
+		if type(db[realm]) == "table" then
+			mapPlayerToFaction[realm] = {}
+			for faction in pairs(db[realm]) do
+				for name in pairs(db[realm][faction]) do
+					mapPlayerToFaction[realm][name] = faction
+				end
+			end
+		end
+	end
+end
+
 
 local BuildSortedLists
 do
@@ -333,6 +397,56 @@ local function PerformLevelSquish()
 	db.performedLevelSquish = true
 
 end
+
+
+-- If players do not fit into one tooltip, we have to start additional ones.
+local additionalTooltips = {}
+
+
+-- Using first tooltip of additionalTooltips to calcualte line height.
+local tooltipLineHeight = nil
+-- https://warcraft.wiki.gg/wiki/API_GameTooltip_GetPadding only returned 0,0,0,0 for me, so I am getting the "padding" manually.
+-- (The "padding" is the actual padding plus the difference between a normal tooltip line and the slightly greater title line.)
+local tooltipTopBottomPadding = nil
+function GetTooltipLineHeight()
+
+	local testTooltip = additionalTooltips[1]
+
+	if not testTooltip then
+		testTooltip = CreateFrame("GameTooltip", ADDON .. "_AdditionalTooltip" .. "1", UIParent, "SharedTooltipTemplate")
+		tinsert(additionalTooltips, testTooltip)
+	else
+		testTooltip:ClearLines()
+	end
+
+	testTooltip:SetOwner(UIParent, "ANCHOR_TOPLEFT")
+
+	testTooltip:AddLine("Title")
+	testTooltip:Show()
+	local tooltipHeight1 = testTooltip:GetHeight()
+	testTooltip:AddLine("Line 1")
+	testTooltip:Show()
+	local tooltipHeight2 = testTooltip:GetHeight()
+	local lineHeight = tooltipHeight2 - tooltipHeight1
+
+	-- Check to be on the safe side.
+	testTooltip:AddLine("Line 2")
+	testTooltip:Show()
+	local tooltipHeight3 = testTooltip:GetHeight()
+	testTooltip:Hide()
+
+	-- print(math.floor((tooltipHeight2 + lineHeight) * 10000), "should equal", math.floor(tooltipHeight3 * 10000))
+
+	if math.floor((tooltipHeight2 + lineHeight - tooltipHeight3) * 10000) == 0 then
+		tooltipLineHeight = lineHeight
+		tooltipTopBottomPadding = tooltipHeight1 - lineHeight
+	else
+		tooltipLineHeight = nil
+		tooltipTopBottomPadding = nil
+	end
+
+end
+
 ------------------------------------------------------------------------
 
 local BrokerPlayedTime = CreateFrame("Frame")
@@ -354,17 +468,21 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 	end
 
 	local defaults = {
-		classIcons = false,
-		factionIcons = false,
-		levels = false,
-		onlyCurrentRealm = false,
-
 		sortByPlayedTime = false,
 		sortByLevel = false,
+
+		levels = false,
+		classIcons = false,
+		factionIcons = false,
+
+		groupByFactions = true,
+		onlyCurrentRealm = false,
 		currentPlayerOnTop = true,
 		highlightCurrentPlayer = false,
-		groupByFactions = true,
+
 		onlyHours = false,
+
+		brokerTextCurrentChar = true,
 
 		[currentRealm] = {
 			[currentFaction] = {
@@ -381,23 +499,13 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 	BrokerPlayedTimeDB = BrokerPlayedTimeDB or {}
 	db = copyTable(defaults, BrokerPlayedTimeDB)
 
+	RemoveDuplicates()
+
 	myDB = db[currentRealm][currentFaction][currentPlayer]
 
-
-	wipe(mapPlayerToFaction)
-	for realm in pairs(db) do
-		if type(db[realm]) == "table" then
-			mapPlayerToFaction[realm] = {}
-			for faction in pairs(db[realm]) do
-				for name in pairs(db[realm][faction]) do
-					mapPlayerToFaction[realm][name] = faction
-				end
-			end
-		end
-	end
-
-
 	PerformLevelSquish()
+
+	BuildMapPlayerToFaction()
 
 	BuildSortedLists()
 
@@ -424,6 +532,8 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 	myDB.level = UnitLevel("player")
 
 	self:UpdateTimePlayed()
+
+	GetTooltipLineHeight()
 
 end
 
@@ -516,12 +626,16 @@ BrokerPlayedTimeMenu.GetHighlightCurrentPlayer = function() return db.highlightC
 BrokerPlayedTimeMenu.SetHighlightCurrentPlayer = function() db.highlightCurrentPlayer = not db.highlightCurrentPlayer end
 
 BrokerPlayedTimeMenu.GetOnlyHours = function() return db.onlyHours end
-BrokerPlayedTimeMenu.SetOnlyHours = function() db.onlyHours = not db.onlyHours end
+BrokerPlayedTimeMenu.SetOnlyHours = function()
+	db.onlyHours = not db.onlyHours
+	BrokerPlayedTime:UpdateText()
+end
 
 BrokerPlayedTimeMenu.GetHideOtherRealms = function() return db.onlyCurrentRealm end
 BrokerPlayedTimeMenu.SetHideOtherRealms = function()
 	db.onlyCurrentRealm = not db.onlyCurrentRealm
 	BuildSortedLists()
+	BrokerPlayedTime:UpdateText()
 end
 
 BrokerPlayedTimeMenu.CloseDropDownMenus = function() CloseDropDownMenus() end
@@ -549,18 +663,33 @@ BrokerPlayedTimeMenu.RemoveCharacter = function(button)
 			sortedRealms[realm] = nil
 		end
 
+		BuildMapPlayerToFaction()
 		BuildSortedLists()
 		CloseDropDownMenus()
 	end
 end
 
-BrokerPlayedTimeMenu.initialize = function(self, level)
+BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 	if not level then return end
 	local info = wipe(self.info)
 	if level == 1 then
 		info.text = L["Played Time"]
 		info.isTitle = 1
 		info.notCheckable = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+		info.text = " "
+		info.disabled = 1
+		info.notCheckable = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+		info.text = L["Sorting"]
+		info.hasArrow = 1
+		info.keepShownOnClick = 1
+		info.notCheckable = 1
+		info.menuList = "Sorting"
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
@@ -587,51 +716,16 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		wipe(self.info)
 
 		info.text = L["Faction icons"]
-		info.isNotRadio = 1
+		info.hasArrow = 1
 		info.keepShownOnClick = 1
-		info.checked = self.GetFactionIcons
-		info.func = self.SetFactionIcons
+		info.notCheckable = 1
+		info.menuList = "Faction icons"
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
 		info.text = " "
 		info.disabled = 1
 		info.notCheckable = 1
-		UIDropDownMenu_AddButton(info, level)
-		wipe(self.info)
-
-		info.text = L["Current realm only"]
-		info.isNotRadio = 1
-		info.keepShownOnClick = 1
-		info.checked = self.GetHideOtherRealms
-		info.func = self.SetHideOtherRealms
-		UIDropDownMenu_AddButton(info, level)
-		wipe(self.info)
-
-		info.text = " "
-		info.disabled = 1
-		info.notCheckable = 1
-		UIDropDownMenu_AddButton(info, level)
-		wipe(self.info)
-
-		info.text = L["Sort alphabetically"]
-		info.checked = self.GetSortAlphabetically
-		info.func = self.SetSortAlphabetically
-		info.keepShownOnClick = 1
-		UIDropDownMenu_AddButton(info, level)
-		wipe(self.info)
-
-		info.text = L["Sort by played time"]
-		info.checked = self.GetSortByPlayedTime
-		info.func = self.SetSortByPlayedTime
-		info.keepShownOnClick = 1
-		UIDropDownMenu_AddButton(info, level)
-		wipe(self.info)
-
-		info.text = L["Sort by level"]
-		info.checked = self.GetSortByLevel
-		info.func = self.SetSortByLevel
-		info.keepShownOnClick = 1
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
@@ -643,7 +737,15 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
-		info.text = L["Current player on top"]
+		info.text = L["Current realm only"]
+		info.isNotRadio = 1
+		info.keepShownOnClick = 1
+		info.checked = self.GetHideOtherRealms
+		info.func = self.SetHideOtherRealms
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+		info.text = L["Current character on top"]
 		info.isNotRadio = 1
 		info.checked = self.GetCurrentPlayerOnTop
 		info.func = self.SetCurrentPlayerOnTop
@@ -651,7 +753,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
-		info.text = L["Current player highlighted"]
+		info.text = L["Current character highlighted"]
 		info.isNotRadio = 1
 		info.checked = self.GetHighlightCurrentPlayer
 		info.func = self.SetHighlightCurrentPlayer
@@ -683,6 +785,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		info.hasArrow = 1
 		info.keepShownOnClick = 1
 		info.notCheckable = 1
+		info.menuList = "Remove character"
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
@@ -692,21 +795,113 @@ BrokerPlayedTimeMenu.initialize = function(self, level)
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
+		-- Do not show this option for users of PlayedTimeMinimapClock.
+		if not TimeManagerClockButton:IsMouseOver() then
+			info.text = L["Broker icon text"]
+			info.hasArrow = 1
+			info.keepShownOnClick = 1
+			info.notCheckable = 1
+			info.menuList = "Broker icon text"
+			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
+		end
+
+		info.text = " "
+		info.disabled = 1
+		info.notCheckable = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+
+
 		info.text = CLOSE
 		info.func = self.CloseDropDownMenus
 		info.notCheckable = 1
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
+
 	elseif level == 2 then
-		for _, realm in ipairs(sortedRealms) do
-			info.text = realm
-			info.value = realm
-			info.hasArrow = 1
+
+		if menuList == "Sorting" then
+
+			info.text = L["By played time"]
+			info.checked = self.GetSortByPlayedTime
+			info.func = self.SetSortByPlayedTime
 			info.keepShownOnClick = 1
-			info.notCheckable = 1
 			UIDropDownMenu_AddButton(info, level)
 			wipe(self.info)
+
+			info.text = L["By character name"]
+			info.checked = self.GetSortAlphabetically
+			info.func = self.SetSortAlphabetically
+			info.keepShownOnClick = 1
+			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
+
+			info.text = L["By character level"]
+			info.checked = self.GetSortByLevel
+			info.func = self.SetSortByLevel
+			info.keepShownOnClick = 1
+			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
+
+		elseif menuList == "Faction icons" then
+
+			for k, v in pairs(factionIcons) do
+				if k == false then
+					info.text = L["None"]
+				else
+					info.text = v["Alliance"] .. " " .. v["Horde"] .. " " .. v["Neutral"]
+				end
+				info.checked = function() return db.factionIcons == k end
+				info.func =
+					function()
+						db.factionIcons = k
+						UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+					end
+				info.keepShownOnClick = 1
+				UIDropDownMenu_AddButton(info, level)
+				wipe(self.info)
+			end
+
+		elseif menuList == "Broker icon text" then
+
+			info.text = L["Current character time"]
+			info.checked = function() return db.brokerTextCurrentChar end
+			info.func =
+				function()
+					db.brokerTextCurrentChar = not db.brokerTextCurrentChar
+					UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+					BrokerPlayedTime:UpdateText()
+				end
+			info.keepShownOnClick = 1
+			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
+
+			info.text = L["Total time"]
+			info.checked = function() return not db.brokerTextCurrentChar end
+			info.func =
+				function()
+					db.brokerTextCurrentChar = not db.brokerTextCurrentChar
+					UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+					BrokerPlayedTime:UpdateText()
+				end
+			info.keepShownOnClick = 1
+			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
+
+		elseif menuList == "Remove character" then
+			for _, realm in ipairs(sortedRealms) do
+				info.text = realm
+				info.value = realm
+				info.hasArrow = 1
+				info.keepShownOnClick = 1
+				info.notCheckable = 1
+				UIDropDownMenu_AddButton(info, level)
+				wipe(self.info)
+			end
 		end
+
 	elseif level == 3 then
 		local factions = 0
 		for i, faction in ipairs(sortedFactions) do
@@ -755,67 +950,411 @@ end
 
 ------------------------------------------------------------------------
 
-local function AddPlayerLines(tooltip, realm, names)
-	local total = 0
 
-	if names and #names > 0 then
-		for _, name in ipairs(names) do
-			local data = db[realm][mapPlayerToFaction[realm][name]][name]
-			if data then
+local function AddPlayerLines(tooltip, realm, names, firstIndex, lastIndex)
+	if not realm or not names or #names == 0 then return 0 end
+	if firstIndex and lastIndex and firstIndex > lastIndex then return 0 end
 
-				if realm == currentRealm and name == currentPlayer then
-					t = data.timePlayed + time() - data.timeUpdated
-				else
-					t = data.timePlayed
-				end
+	local totalTime = 0
+	local indexCounter = 0
 
-				if t > 0 then
+	for _, name in ipairs(names) do
+		local data = db[realm][mapPlayerToFaction[realm][name]][name]
+		if data then
+
+			local charTime = nil
+
+			if realm == currentRealm and name == currentPlayer then
+				charTime = data.timePlayed + time() - data.timeUpdated
+			else
+				charTime = data.timePlayed
+			end
+
+			if charTime and charTime > 0 then
+				indexCounter = indexCounter + 1
+
+				if not firstIndex or indexCounter >= firstIndex then
 					tooltip:AddDoubleLine(
 						format("%s%s%s%s%s%s|r",
-							db.factionIcons and factionIcons[mapPlayerToFaction[realm][name]] or "",
+							factionIcons[db.factionIcons][mapPlayerToFaction[realm][name]],
 							db.classIcons and classIcons[data.class] or "",
 							CLASS_COLORS[data.class] or GRAY,
-							(db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:14|t" or "",
+							(db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. math.floor(tooltipLineHeight) .. "|t" or "",
 							name,
 							db.levels and " ("..data.level..")" or ""
 						),
-						FormatTime(t)
+						FormatTime(charTime)
 					)
 
-					total = total + t
+					totalTime = totalTime + charTime
 				end
 
+				if lastIndex and indexCounter >= lastIndex then return totalTime end
 			end
-		end
 
+		end
 	end
 
-	return total
+
+
+	return totalTime
 end
 
 
+
+
+
+
 local function OnTooltipShow(tooltip)
-	local total = 0
-	tooltip:AddLine(L["Played Time"])
+
+	-- Estimate how many tooltips we need.
+	local tooltipInitialHeight = 0
+	local initialNumLines = tooltip:NumLines()
+	if initialNumLines > 0 then
+		tooltip:Show()
+		tooltipInitialHeight = tooltip:GetHeight()
+	else
+		tooltipInitialHeight = tooltipTopBottomPadding
+	end
+	-- print("tooltipInitialHeight", tooltipInitialHeight)
+	-- print("initialNumLines", initialNumLines)
+
+
+	local lineCounter = 0
+	lineCounter = lineCounter + 1	 					-- tooltip:AddLine(L["Played Time"])
+
 	for _, realm in ipairs(sortedRealms) do
-		tooltip:AddLine(" ")
+		lineCounter = lineCounter + 1					-- tooltip:AddLine(" ")
 		if #sortedRealms > 1 then
-			tooltip:AddLine(realm)
+			lineCounter = lineCounter + 1	 			-- tooltip:AddLine(realm)
 		end
 
 		if db.groupByFactions then
 			for _, faction in ipairs(sortedFactions) do
-				total = total + AddPlayerLines(tooltip, realm, sortedPlayers[realm][faction])
+				-- Not every realm has every faction.
+				if sortedPlayers[realm][faction] then
+					lineCounter = lineCounter + #sortedPlayers[realm][faction]			-- AddPlayerLines(tooltip, realm, sortedPlayers[realm][faction])
+				end
 			end
 		else
-			total = total + AddPlayerLines(tooltip, realm, sortedPlayersNoFactions[realm])
+			lineCounter = lineCounter + #sortedPlayersNoFactions[realm]				-- AddPlayerLines(tooltip, realm, sortedPlayersNoFactions[realm])
 		end
 
 	end
 
-	tooltip:AddLine(" ")
-	tooltip:AddDoubleLine(L["Total"], FormatTime(total))
+	lineCounter = lineCounter + 1	 			-- tooltip:AddLine(" ")
+	lineCounter = lineCounter + 1	 			-- tooltip:AddDoubleLine(L["Total"], FormatTime(total))
+
+
+	local estimatedHeight = tooltipInitialHeight + lineCounter*tooltipLineHeight
+	-- print("estimatedHeight", estimatedHeight)
+
+	local allowedHeight = 0.7 * UIParent:GetHeight()
+	-- print("allowedHeight", allowedHeight)
+
+
+	-- One tooltip is enough.
+	if estimatedHeight <= allowedHeight then
+		local totalTime = 0
+		tooltip:AddLine(L["Played Time"])
+		for _, realm in ipairs(sortedRealms) do
+			tooltip:AddLine(" ")
+			if #sortedRealms > 1 then
+				tooltip:AddLine(realm)
+			end
+
+			if db.groupByFactions then
+				for _, faction in ipairs(sortedFactions) do
+					totalTime = totalTime + AddPlayerLines(tooltip, realm, sortedPlayers[realm][faction])
+				end
+			else
+				totalTime = totalTime + AddPlayerLines(tooltip, realm, sortedPlayersNoFactions[realm])
+			end
+		end
+
+		tooltip:AddLine(" ")
+		tooltip:AddDoubleLine(L["Total"], FormatTime(totalTime))
+
+		tooltip:Show()
+		-- print("real height", tooltip:GetHeight(), tooltip:NumLines())
+
+
+	-- #########################################################################
+	-- We need several tooltips.
+	else
+
+		-- Create the additional tooltips.
+		local numNeededTooltips = ceil(estimatedHeight / allowedHeight)
+		-- print("numNeededTooltips", numNeededTooltips)
+
+		-- Make all tooltips equally long.
+		-- Each of the numNeededTooltips - 1 additional tooltips adds tooltipTopBottomPadding plus one tooltipLineHeight (blank title line) to the estimated height.
+		-- If there is a new realm at the beginning of an additional tooltip, the extra tooltipLineHeight corresponds to the blank line preceding the realm name.
+		-- Hence, allowedHeight is slightly too great. But this is OK, as we are fine with the last additinal tooltip not being fully filled.
+		allowedHeight = (estimatedHeight + (numNeededTooltips - 1)*(tooltipTopBottomPadding + tooltipLineHeight)) / numNeededTooltips
+		-- print("distributed allowedHeight", allowedHeight)
+
+
+		-- Store the maximum tooltip height to make them all equally high.
+		local maxTooltipHeight = 0
+
+		for i = 1, numNeededTooltips-1 do
+			if not additionalTooltips[i] then
+				additionalTooltips[i] = CreateFrame("GameTooltip", ADDON .. "_AdditionalTooltip" .. i .. "asdas", UIParent, "SharedTooltipTemplate")
+			end
+		end
+
+		-- To hide additional tootips with original tooltip.
+		if not tooltip.BrokerPlayedTime_hooked then
+			tooltip:HookScript("OnHide", function()
+				for _, v in pairs(additionalTooltips) do
+					if v:IsShown() then
+						v:Hide()
+					end
+				end
+			end)
+			tooltip.BrokerPlayedTime_hooked = true
+		end
+
+
+		-- The tootips in the order we will use them!
+		local tooltipsInOrder = {}
+
+		-- #########################################################################
+		-- Decide whether to append additional tooltips left or right.
+		if UIParent:GetWidth() * UIParent:GetEffectiveScale() / GetCursorPosition() > 2 then
+			-- print("Cursor is in LEFT side of screen")
+			-- Original tooltip stays leftmost.
+			tooltipsInOrder[1] = tooltip
+
+			-- Additional tooltips get appended right.
+			for i = 1, numNeededTooltips-1 do
+
+				local tooltipOwner = i == 1 and tooltip or additionalTooltips[i-1]
+				if tooltipOwner ~= additionalTooltips[i]:GetOwner() then
+					-- SetOwner() performs ClearAllPoints() and ClearLines() as well.
+					additionalTooltips[i]:SetOwner(tooltipOwner, "ANCHOR_NONE")
+					additionalTooltips[i]:SetPoint("TOPLEFT", tooltipOwner, "TOPRIGHT", -3, 0)
+				else
+					additionalTooltips[i]:ClearLines()
+				end
+
+				tooltipsInOrder[i+1] = additionalTooltips[i]
+			end
+
+		-- #########################################################################
+		else
+			-- print("Cursor is in RIGHT side of screen")
+			-- Original tooltip becomes rightmost.
+			-- (Changing the anchor points did not work, clearing and reusing original tooltip worked.)
+			tooltipsInOrder[numNeededTooltips] = tooltip
+
+			-- Additional tooltips get appended left.
+			for i = numNeededTooltips-1, 1, -1  do
+
+				local tooltipOwner = i == numNeededTooltips-1 and tooltip or additionalTooltips[i+1]
+				if tooltipOwner ~= additionalTooltips[i]:GetOwner() then
+					-- SetOwner() performs ClearAllPoints() and ClearLines() as well.
+					additionalTooltips[i]:SetOwner(tooltipOwner, "ANCHOR_NONE")
+					additionalTooltips[i]:SetPoint("TOPRIGHT", tooltipOwner, "TOPLEFT", 3, 0)
+				else
+					additionalTooltips[i]:ClearLines()
+				end
+
+				tooltipsInOrder[i] = additionalTooltips[i]
+			end
+
+
+			-- Copy content (if any) of original tooltip to the leftmost additional tooltip.
+			if initialNumLines > 0 then
+
+				local leftText,  leftTextR,  leftTextG,  leftTextB  = {}, {}, {}, {}
+				local rightText, rightTextR, rightTextG, rightTextB = {}, {}, {}, {}
+
+				for i = 1, initialNumLines do
+					leftText[i] = _G[tooltip:GetName().."TextLeft"..i]:GetText()
+					leftTextR[i], leftTextG[i], leftTextB[i] = _G[tooltip:GetName().."TextLeft"..i]:GetTextColor()
+					rightText[i] = _G[tooltip:GetName().."TextRight"..i]:GetText()
+					rightTextR[i], rightTextG[i], rightTextB[i] = _G[tooltip:GetName().."TextRight"..i]:GetTextColor()
+					-- print(i, leftText[i], rightText[i], leftTextR[i], leftTextG[i], leftTextB[i], rightTextR[i], rightTextG[i], rightTextB[i])
+				end
+
+				for i = 1, initialNumLines do
+					-- print(i, leftText[i], rightText[i], leftTextR[i], leftTextG[i], leftTextB[i], rightTextR[i], rightTextG[i], rightTextB[i])
+					if rightText then
+						tooltipsInOrder[1]:AddDoubleLine(leftText[i], rightText[i], leftTextR[i], leftTextG[i], leftTextB[i], rightTextR[i], rightTextG[i], rightTextB[i])
+					else
+						tooltipsInOrder[1]:AddLine(leftText[i], leftTextR[i], leftTextG[i], leftTextB[i], true)
+					end
+				end
+
+				-- Clear original tooltip.
+				tooltip:ClearLines()
+
+			end
+
+		end
+
+
+
+		-- #########################################################################
+		-- Start filling the tooltips.
+
+
+
+		local lineCounter = 0
+		local currentTooltipIndex = 1
+		local currentTooltip = tooltipsInOrder[currentTooltipIndex]
+		-- currentTooltip:AddLine("This is tooltip" .. currentTooltipIndex .. " " .. (currentTooltip:GetName() and currentTooltip:GetName() or "no name"))
+
+		local tooltipLinesLeft = nil
+
+		-- Function to skip to the next tooltip. Resetting all values accordingly.
+		local function NextTooltip()
+			-- If we unexpectedly hit the end of the last tooltip, we continue!
+			if currentTooltipIndex == numNeededTooltips then return end
+
+			currentTooltip:Show()
+			local currentTooltipHeight = currentTooltip:GetHeight()
+			if currentTooltipHeight > maxTooltipHeight then
+				maxTooltipHeight = currentTooltipHeight
+			end
+
+			-- print("------------- change from tooltip", currentTooltipIndex, "to", currentTooltipIndex + 1)
+			currentTooltipIndex = currentTooltipIndex + 1
+			currentTooltip = tooltipsInOrder[currentTooltipIndex]
+			-- currentTooltip:AddLine("This is tooltip" .. currentTooltipIndex .. " " .. (currentTooltip:GetName() and currentTooltip:GetName() or "no name"))
+
+			tooltipInitialHeight = tooltipTopBottomPadding
+
+			-- Add a blank line to skip title of additional tooltips.
+			currentTooltip:AddLine(" ")
+			lineCounter = 1
+			tooltipLinesLeft = floor((allowedHeight - (tooltipInitialHeight + tooltipLineHeight)) / tooltipLineHeight)
+		end
+
+
+		currentTooltip:AddLine(L["Played Time"])
+		currentTooltip:AddLine(" ")
+		lineCounter = lineCounter + 2
+
+		local totalTime = 0
+		for _, realm in ipairs(sortedRealms) do
+
+			-- Starting character list of a new realm.
+
+			-- How many lines do still fit on the current tooltip?
+			tooltipLinesLeft = floor((allowedHeight - (tooltipInitialHeight + lineCounter*tooltipLineHeight)) / tooltipLineHeight)
+			-- print("++", realm, "tooltipLinesLeft", tooltipLinesLeft)
+
+			-- Only start a new realm at the end of a tooltip, if we have at least space for 4 lines: blank, realm name, 2 characters
+			-- Otherwise, continue with next tooltip.
+			if tooltipLinesLeft < 4 then
+				NextTooltip()
+			end
+
+			-- Only add realm name, if there are more than one.
+			if #sortedRealms > 1 then
+				-- Add a blank line before starting a new realm, unless this is the first line of a tooltip.
+				if (currentTooltipIndex == 1 and lineCounter > 2) or (currentTooltipIndex > 1 and lineCounter > 1) then
+					currentTooltip:AddLine(" ")
+					lineCounter = lineCounter + 1
+				end
+				currentTooltip:AddLine(realm)
+				lineCounter = lineCounter + 1
+			end
+
+
+			local function TooltipSkippingCharacterPrint(listOfCharacterNames, minRest)
+
+				if not minRest then minRest = 2 end
+
+				local charactersToPrint = #listOfCharacterNames
+				-- print("---", realm, "charactersToPrint", charactersToPrint)
+
+				local firstIndex = 1
+				local lastIndex = #listOfCharacterNames
+
+				while charactersToPrint > 0 do
+
+					-- print("in loop charactersToPrint", charactersToPrint)
+					-- print("in loop tooltipLinesLeft", tooltipLinesLeft)
+
+					tooltipLinesLeft = floor((allowedHeight - (tooltipInitialHeight + lineCounter*tooltipLineHeight)) / tooltipLineHeight)
+					-- Only print as many characters as there are lines left.
+					-- But only if there are more than minRest characters left to be printed on the next tooltip.
+					if tooltipLinesLeft > 0 and tooltipLinesLeft < charactersToPrint and (charactersToPrint - tooltipLinesLeft > minRest) then
+						-- print(charactersToPrint, "characters", "are too many for", tooltipLinesLeft)
+						lastIndex = tooltipLinesLeft
+					end
+
+					-- print("printing", firstIndex, "to", lastIndex, "on", currentTooltip:GetName())
+					totalTime = totalTime + AddPlayerLines(currentTooltip, realm, listOfCharacterNames, firstIndex, lastIndex)
+					lineCounter = lineCounter + (lastIndex - firstIndex + 1)
+
+					-- Are we skipping a tooltip?
+					if lastIndex == tooltipLinesLeft then
+						NextTooltip()
+					end
+
+					charactersToPrint = charactersToPrint - lastIndex
+					-- Prepare indexes for next iteration, if there is one.
+					if charactersToPrint > 0 then
+						firstIndex = lastIndex + 1
+						lastIndex = #listOfCharacterNames
+					end
+
+				end
+
+			end
+
+
+
+			if db.groupByFactions then
+				for i, faction in ipairs(sortedFactions) do
+					-- Not every realm has every faction.
+					if sortedPlayers[realm][faction] then
+						if i < #sortedFactions then
+							TooltipSkippingCharacterPrint(sortedPlayers[realm][faction], 0)
+						else
+						  TooltipSkippingCharacterPrint(sortedPlayers[realm][faction], 2)
+						end
+					end
+				end
+			else
+				TooltipSkippingCharacterPrint(sortedPlayersNoFactions[realm], 2)
+			end
+
+		end
+
+
+		currentTooltip:AddLine(" ")
+		currentTooltip:AddDoubleLine(L["Total"], FormatTime(totalTime))
+
+
+		currentTooltip:Show()
+		local currentTooltipHeight = currentTooltip:GetHeight()
+		if currentTooltipHeight > maxTooltipHeight then
+			maxTooltipHeight = currentTooltipHeight
+		end
+
+
+		-- Make all tooltips equally high.
+		-- GameTooltip gets automatically reset. So we have to increase its size by blank lines.
+		while GameTooltip:GetHeight() < maxTooltipHeight do
+			GameTooltip:AddLine(" ")
+			GameTooltip:Show()
+		end
+		maxTooltipHeight = GameTooltip:GetHeight()
+		for _, k in pairs(tooltipsInOrder) do
+			k:SetHeight(maxTooltipHeight)
+		end
+
+	end
+
 end
+
+
 
 ------------------------------------------------------------------------
 
@@ -826,6 +1365,7 @@ BrokerPlayedTime.dataObject = LibStub("LibDataBroker-1.1"):NewDataObject(L["Time
 	OnTooltipShow = OnTooltipShow,
 	OnClick = function(self, button)
 		if button == "RightButton" then
+			GameTooltip:Hide()
 			ToggleDropDownMenu(1, nil, BrokerPlayedTimeMenu, self, 0, 0, nil, nil, 15)
 			if BrokerPlayedTimeMenu ~= UIDROPDOWNMENU_OPEN_MENU then
 				self:GetScript("OnEnter")(self)
@@ -835,21 +1375,44 @@ BrokerPlayedTime.dataObject = LibStub("LibDataBroker-1.1"):NewDataObject(L["Time
 })
 
 function BrokerPlayedTime:UpdateText()
-	local t = myDB.timePlayed + time() - myDB.timeUpdated
-	self.dataObject.text = FormatTime(t, t > 3600)
+
+	local timeToPrint = 0
+
+	if db.brokerTextCurrentChar then
+		timeToPrint = myDB.timePlayed + time() - myDB.timeUpdated
+	else
+		for _, realm in pairs(sortedRealms) do
+			for _, faction in pairs(db[realm]) do
+				for name, data in pairs(faction) do
+					if data then
+
+						local charTime = nil
+						if realm == currentRealm and name == currentPlayer then
+							charTime = data.timePlayed + time() - data.timeUpdated
+						else
+							charTime = data.timePlayed
+						end
+
+						timeToPrint = timeToPrint + charTime
+					end
+				end
+			end
+		end
+	end
+	self.dataObject.text = FormatTime(timeToPrint, timeToPrint > 3600)
 end
 
 do
-	local t
+	local updateDelay
 	local function UpdateText()
 		BrokerPlayedTime:UpdateText()
-		C_Timer.After(t, UpdateText)
+		C_Timer.After(updateDelay, UpdateText)
 	end
 	function BrokerPlayedTime:SetUpdateInterval(fast)
-		local o = t
-		t = fast and 30 or 300
-		if not o then
-			C_Timer.After(t, UpdateText)
+		local alreadyRunning = updateDelay
+		updateDelay = fast and 30 or 300
+		if not alreadyRunning then
+			C_Timer.After(updateDelay, UpdateText)
 		end
 	end
 end
