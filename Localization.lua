@@ -32,25 +32,29 @@ if CURRENT_LOCALE == "enUS" then return end
 if CURRENT_LOCALE == "deDE" then
 
 L["Played Time"] = "Gespielte Zeit"
+L["Right click for settings"] = "Rechtsklick für Einstellungen"
 L["Total"] = "Gesamt"
 L["Sorting"] = "Sortierung"
 L["By played time"] = "Nach Zeit"
-L["By played time this level"] = "Nach Zeit auf diesem Level"
+L["By played time this level"] = "Nach Zeit auf dieser Stufe"
 L["By character name"] = "Nach Charaktername"
 L["By character level"] = "Nach Charakterlevel"
-L["Character levels"] = "Charakterlevel"
-L["Class icons"] = "Klassensymbole"
-L["Faction icons"] = "Fraktionssymbole"
+L["Sorting of equal levels"] = "Sortierung gleicher Stufen"
+L["Show character levels"] = "Charakterlevel anzeigen"
+L["Show played time this level"] = "Gespielte Zeit auf dieser Stufe anzeigen"
+L["Show class icons"] = "Klassensymbole anzeigen"
+L["Show faction icons"] = "Fraktionssymbole anzeigen"
 L["None"] = "Keine"
 L["Group by factions"] = "Nach Fraktionen gruppiert"
-L["Current realm only"] = "Nur aktueller Server"
+L["Current realm only"] = "Nur aktuelles Realm"
 L["Current character on top"] = "Aktueller Charakter oben"
-L["Current character highlighted"] = "Aktuellen Charakter hervorheben"
+L["Current character highlighted"] = "Aktueller Charakter mit Pfeil"
 L["Time in hours (not days)"] = "Zeit in Stunden (nicht Tagen)"
+L["Always show minutes also"] = "Immer auch Minuten anzeigen"
 L["Remove character"] = "Charakter entfernen"
 L["Broker icon text"] = "Broker Icontext"
 L["Current character time"] = "Zeit des aktuellen Charakters"
-L["Total time"] "Gesamtzeit"
+L["Total time"] = "Gesamtzeit"
 
 return end
 
@@ -60,10 +64,10 @@ return end
 
 if CURRENT_LOCALE == "esES" then
 
-L["Character levels"] = "Niveles de personajes"
-L["Class icons"] = "Iconos de clase"
+L["Show character levels"] = "Niveles de personajes"
+L["Show class icons"] = "Iconos de clase"
+L["Show faction icons"] = "Iconos de facción"
 L["Current realm only"] = "Sólo el reino actual"
-L["Faction icons"] = "Iconos de facción"
 L["Remove character"] = "Eliminar personaje"
 
 return end
@@ -74,10 +78,10 @@ return end
 
 if CURRENT_LOCALE == "esMX" then
 
-L["Character levels"] = "Niveles de personajes"
-L["Class icons"] = "Iconos de clase"
+L["Show character levels"] = "Niveles de personajes"
+L["Show class icons"] = "Iconos de clase"
+L["Show faction icons"] = "Iconos de facción"
 L["Current realm only"] = "Sólo el reino actual"
-L["Faction icons"] = "Iconos de facción"
 L["Remove character"] = "Eliminar personaje"
 
 return end
@@ -88,10 +92,10 @@ return end
 
 if CURRENT_LOCALE == "frFR" then
 
-L["Character levels"] = "Niveaux de personnages"
-L["Class icons"] = "Icônes de classe"
+L["Show character levels"] = "Niveaux de personnages"
+L["Show class icons"] = "Icônes de classe"
+L["Show faction icons"] = "Icônes de faction"
 L["Current realm only"] = "Royaume actuel uniquement"
-L["Faction icons"] = "Icônes de faction"
 L["Remove character"] = "Supprimer personnage"
 
 return end
@@ -102,10 +106,10 @@ return end
 
 if CURRENT_LOCALE == "itIT" then
 
-L["Character levels"] = "Livelli di caratteri"
-L["Class icons"] = "Icone di classi"
+L["Show character levels"] = "Livelli di caratteri"
+L["Show class icons"] = "Icone di classi"
+L["Show faction icons"] = "Icone di fazioni"
 L["Current realm only"] = "Solo il reame corrente"
-L["Faction icons"] = "Icone di fazioni"
 L["Remove character"] = "Rimuovere il carattere"
 L["Total"] = "Totale"
 
@@ -117,10 +121,10 @@ return end
 
 if CURRENT_LOCALE == "ptBR" then
 
-L["Character levels"] = "Níveis de personagem"
-L["Class icons"] = "Ícones da classe"
+L["Show character levels"] = "Níveis de personagem"
+L["Show class icons"] = "Ícones da classe"
+L["Show faction icons"] = "Ícones da facção"
 L["Current realm only"] = "Só o reino atual"
-L["Faction icons"] = "Ícones da facção"
 L["Remove character"] = "Remover o personagem"
 
 return end
@@ -131,9 +135,9 @@ return end
 
 if CURRENT_LOCALE == "ruRU" then
 
-L["Character levels"] = "Уровни персонажей"
-L["Class icons"] = "Значки классов"
-L["Faction icons"] = "Значки фракций"
+L["Show character levels"] = "Уровни персонажей"
+L["Show class icons"] = "Значки классов"
+L["Show faction icons"] = "Значки фракций"
 L["Remove character"] = "Удалить персонаж"
 L["Total"] = "Общее"
 
@@ -145,9 +149,9 @@ return end
 
 if CURRENT_LOCALE == "koKR" then
 
-L["Character levels"] = "캐릭터 레벨"
-L["Class icons"] = "직업 아이콘"
-L["Faction icons"] = "진영 아이콘"
+L["Show character levels"] = "캐릭터 레벨"
+L["Show class icons"] = "직업 아이콘"
+L["Show faction icons"] = "진영 아이콘"
 L["Remove character"] = "캐릭터 삭제"
 L["Total"] = "전체"
 
@@ -159,9 +163,9 @@ return end
 
 if CURRENT_LOCALE == "zhCN" then
 
-L["Character levels"] = "角色等级"
-L["Class icons"] = "职业图标"
-L["Faction icons"] = "阵营图标"
+L["Show character levels"] = "角色等级"
+L["Show class icons"] = "职业图标"
+L["Show faction icons"] = "阵营图标"
 L["Remove character"] = "移除角色"
 L["Total"] = "总游戏时间"
 
@@ -173,9 +177,9 @@ return end
 
 if CURRENT_LOCALE == "zhTW" then
 
-L["Character levels"] = "角色等級"
-L["Class icons"] = "職業圖示"
-L["Faction icons"] = "陣營圖示"
+L["Show character levels"] = "角色等級"
+L["Show class icons"] = "職業圖示"
+L["Show faction icons"] = "陣營圖示"
 L["Remove character"] = "移除角色"
 L["Total"] = "總遊戲時間"
 

@@ -42,7 +42,7 @@ local factionIcons = {
 }
 
 -- These icons are only available in retail.
-if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then 
+if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
 	factionIcons["set1"] = {
 		Alliance = "|A:AllianceSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
 		Horde = "|A:HordeSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
@@ -59,9 +59,6 @@ if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
 		Neutral = "|A:Warfronts-BaseMapIcons-Empty-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
 	}
 end
-
-
-
 
 
 local classIcons = {}
@@ -87,7 +84,7 @@ do
 	local   M = format("|cffffffff%s|r|cffffcc00%s|r", "%d", MIN_ABBR)
 
 	function FormatTime(t, noMinutes)
-		if not t then return "?" end
+		if not t then return "|cffa8a8a8?|r" end
 
 		local d, h, m
 
@@ -159,18 +156,35 @@ do
 			end
 		end
 
+		-- Sort characters by played time.
 		if db.sortByPlayedTime then
 			local timePlayedA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].timePlayed
 			local timePlayedB = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][b]][b].timePlayed
 			return timePlayedA > timePlayedB
-		elseif db.sortByPlayedTimeLevel then
-			local timePlayedA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].timePlayedLevel or 0
-			local timePlayedB = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][b]][b].timePlayedLevel or 0
-			return timePlayedA > timePlayedB
+		-- Sort characters by level.
 		elseif db.sortByLevel then
 			local levelA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].level
 			local levelB = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][b]][b].level
-			return levelA > levelB
+			-- If characters have the same level.
+			if levelA == levelB then
+				-- Sort characters by played time.
+				if db.equalLevelSortByPlayedTime then
+					local timePlayedA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].timePlayed
+					local timePlayedB = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][b]][b].timePlayed
+					return timePlayedA > timePlayedB
+				-- Sort characters by played time level (if any).
+				elseif db.equalLevelSortByPlayedTimeLevel then
+					local timePlayedA = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][a]][a].timePlayedLevel or 0
+					local timePlayedB = db[currentlySortingRealm][mapPlayerToFaction[currentlySortingRealm][b]][b].timePlayedLevel or 0
+					return timePlayedA > timePlayedB
+				-- Otherwise by name.
+				else
+					return a < b
+				end
+			else
+				return levelA > levelB
+			end
+		-- Sort characters by name.
 		else
 			return a < b
 		end
@@ -480,10 +494,13 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 
 	local defaults = {
 		sortByPlayedTime = false,
-		sortByPlayedTimeLevel = false,
 		sortByLevel = false,
 
+		equalLevelSortByPlayedTime = false,
+		equalLevelSortByPlayedTimeLevel = true,
+
 		levels = false,
+		showPlayedTimeLevel = false,
 		classIcons = false,
 		factionIcons = false,
 
@@ -493,6 +510,7 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 		highlightCurrentPlayer = false,
 
 		onlyHours = false,
+		alwaysShowMinutes = true,
 
 		brokerTextCurrentChar = true,
 
@@ -589,9 +607,91 @@ end
 
 ------------------------------------------------------------------------
 
+-- Remembering these buttons so we can dynamically enable and disable them.
+-- As info.disabled cannot be a function, UIDropDownMenu_RefreshAll()
+-- does not refresh the disabled state.
+local equalLevelSortButton
+local playedTimeLevelButton
+
+
 local BrokerPlayedTimeMenu = CreateFrame("Frame", "BrokerPlayedTimeMenu", nil, "UIDropDownMenuTemplate")
 BrokerPlayedTimeMenu.displayMode = "MENU"
 BrokerPlayedTimeMenu.info = {}
+
+
+BrokerPlayedTimeMenu.GetSortAlphabetically = function() return not db.sortByPlayedTime and not db.sortByLevel end
+BrokerPlayedTimeMenu.SetSortAlphabetically = function()
+	db.sortByPlayedTime = false
+	db.sortByLevel = false
+	-- Have to do this here, because info.disabled cannot be a function.
+	if db.sortByLevel then equalLevelSortButton:Enable() else equalLevelSortButton:Disable() end
+	UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+BrokerPlayedTimeMenu.GetSortByPlayedTime = function() return db.sortByPlayedTime end
+BrokerPlayedTimeMenu.SetSortByPlayedTime = function()
+	db.sortByPlayedTime = true
+	db.sortByLevel = false
+	-- Have to do this here, because info.disabled cannot be a function.
+	if db.sortByLevel then equalLevelSortButton:Enable() else equalLevelSortButton:Disable() end
+	UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+BrokerPlayedTimeMenu.GetSortByLevel = function() return db.sortByLevel end
+BrokerPlayedTimeMenu.SetSortByLevel = function()
+	db.sortByPlayedTime = false
+	db.sortByLevel = true
+	-- Have to do this here, because info.disabled cannot be a function.
+	if db.sortByLevel then equalLevelSortButton:Enable() else equalLevelSortButton:Disable() end
+	UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+BrokerPlayedTimeMenu.GetEqualLevelSortAlphabetically = function() return not db.equalLevelSortByPlayedTime and not db.equalLevelSortByPlayedTimeLevel end
+BrokerPlayedTimeMenu.SetEqualLevelSortAlphabetically = function()
+	db.equalLevelSortByPlayedTime = false
+	db.equalLevelSortByPlayedTimeLevel = false
+	UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+
+BrokerPlayedTimeMenu.GetEqualLevelSortByPlayedTime = function() return db.equalLevelSortByPlayedTime end
+BrokerPlayedTimeMenu.SetEqualLevelSortByPlayedTime = function()
+	db.equalLevelSortByPlayedTime = true
+	db.equalLevelSortByPlayedTimeLevel = false
+	UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+BrokerPlayedTimeMenu.GetEqualLevelSortByPlayedTimeLevel = function() return db.equalLevelSortByPlayedTimeLevel end
+BrokerPlayedTimeMenu.SetEqualLevelSortByPlayedTimeLevel = function()
+	db.equalLevelSortByPlayedTime = false
+	db.equalLevelSortByPlayedTimeLevel = true
+	UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
+	BuildSortedLists()
+end
+
+
+BrokerPlayedTimeMenu.GetLevels = function() return db.levels end
+BrokerPlayedTimeMenu.SetLevels = function()
+	db.levels = not db.levels
+
+	-- Have to do this here, because info.disable cannot be a function.
+	if db.levels then playedTimeLevelButton:Enable() else playedTimeLevelButton:Disable() end
+
+	-- UIDropDownMenu_Refresh() is problematic, because if we want the menu at UIDROPDOWNMENU_MENU_LEVEL == 1 to be refreshed,
+	-- we have to explicitly pass the dropdownLevel 1 as an argument. Because UIDROPDOWNMENU_MENU_LEVEL is only updated when a
+	-- (sub-)menu is opened, not when it is closed. So if we have opened and closed a sub menu before, UIDROPDOWNMENU_MENU_LEVEL
+	-- stays at this sub-menu's dropdownLevel, leading to UIDropDownMenu_Refresh() not refreshing the menu at level 1.
+	-- UIDropDownMenu_RefreshAll() is playing it safe, refreshing all visible menus.
+	UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
+end
+
+BrokerPlayedTimeMenu.GetShowPlayedTimeLevel = function() return db.showPlayedTimeLevel end
+BrokerPlayedTimeMenu.SetShowPlayedTimeLevel = function() db.showPlayedTimeLevel = not db.showPlayedTimeLevel end
 
 BrokerPlayedTimeMenu.GetClassIcons = function() return db.classIcons end
 BrokerPlayedTimeMenu.SetClassIcons = function() db.classIcons = not db.classIcons end
@@ -599,48 +699,16 @@ BrokerPlayedTimeMenu.SetClassIcons = function() db.classIcons = not db.classIcon
 BrokerPlayedTimeMenu.GetFactionIcons = function() return db.factionIcons end
 BrokerPlayedTimeMenu.SetFactionIcons = function() db.factionIcons = not db.factionIcons end
 
-BrokerPlayedTimeMenu.GetLevels = function() return db.levels end
-BrokerPlayedTimeMenu.SetLevels = function() db.levels = not db.levels end
-
-
-BrokerPlayedTimeMenu.GetSortAlphabetically = function() return not db.sortByPlayedTime and not db.sortByPlayedTimeLevel and not db.sortByLevel end
-BrokerPlayedTimeMenu.SetSortAlphabetically = function()
-	db.sortByPlayedTime = false
-	db.sortByPlayedTimeLevel = false
-	db.sortByLevel = false
-	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
-	BuildSortedLists()
-end
-
-BrokerPlayedTimeMenu.GetSortByPlayedTime = function() return db.sortByPlayedTime end
-BrokerPlayedTimeMenu.SetSortByPlayedTime = function()
-	db.sortByPlayedTime = true
-	db.sortByPlayedTimeLevel = false
-	db.sortByLevel = false
-	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
-	BuildSortedLists()
-end
-
-BrokerPlayedTimeMenu.GetSortByPlayedTimeLevel = function() return db.sortByPlayedTimeLevel end
-BrokerPlayedTimeMenu.SetSortByPlayedTimeLevel = function()
-	db.sortByPlayedTime = false
-	db.sortByPlayedTimeLevel = true
-	db.sortByLevel = false
-	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
-	BuildSortedLists()
-end
-
-BrokerPlayedTimeMenu.GetSortByLevel = function() return db.sortByLevel end
-BrokerPlayedTimeMenu.SetSortByLevel = function()
-	db.sortByPlayedTime = false
-	db.sortByPlayedTimeLevel = false
-	db.sortByLevel = true
-	UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
-	BuildSortedLists()
-end
 
 BrokerPlayedTimeMenu.GetGroupByFactions = function() return db.groupByFactions end
 BrokerPlayedTimeMenu.SetGroupByFactions = function() db.groupByFactions = not db.groupByFactions end
+
+BrokerPlayedTimeMenu.GetHideOtherRealms = function() return db.onlyCurrentRealm end
+BrokerPlayedTimeMenu.SetHideOtherRealms = function()
+	db.onlyCurrentRealm = not db.onlyCurrentRealm
+	BuildSortedLists()
+	BrokerPlayedTime:UpdateText()
+end
 
 BrokerPlayedTimeMenu.GetCurrentPlayerOnTop = function() return db.currentPlayerOnTop end
 BrokerPlayedTimeMenu.SetCurrentPlayerOnTop = function()
@@ -651,18 +719,19 @@ end
 BrokerPlayedTimeMenu.GetHighlightCurrentPlayer = function() return db.highlightCurrentPlayer end
 BrokerPlayedTimeMenu.SetHighlightCurrentPlayer = function() db.highlightCurrentPlayer = not db.highlightCurrentPlayer end
 
+
 BrokerPlayedTimeMenu.GetOnlyHours = function() return db.onlyHours end
 BrokerPlayedTimeMenu.SetOnlyHours = function()
 	db.onlyHours = not db.onlyHours
 	BrokerPlayedTime:UpdateText()
 end
 
-BrokerPlayedTimeMenu.GetHideOtherRealms = function() return db.onlyCurrentRealm end
-BrokerPlayedTimeMenu.SetHideOtherRealms = function()
-	db.onlyCurrentRealm = not db.onlyCurrentRealm
-	BuildSortedLists()
+BrokerPlayedTimeMenu.GetAlwaysShowMinutes = function() return db.alwaysShowMinutes end
+BrokerPlayedTimeMenu.SetAlwaysShowMinutes = function()
+	db.alwaysShowMinutes = not db.alwaysShowMinutes
 	BrokerPlayedTime:UpdateText()
 end
+
 
 BrokerPlayedTimeMenu.CloseDropDownMenus = function() CloseDropDownMenus() end
 
@@ -725,7 +794,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
-		info.text = L["Character levels"]
+		info.text = L["Show character levels"]
 		info.isNotRadio = 1
 		info.checked = self.GetLevels
 		info.func = self.SetLevels
@@ -733,7 +802,17 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
-		info.text = L["Class icons"]
+		info.text = L["Show played time this level"]
+		info.isNotRadio = 1
+		info.checked = self.GetShowPlayedTimeLevel
+		info.func = self.SetShowPlayedTimeLevel
+		info.keepShownOnClick = 1
+		playedTimeLevelButton = UIDropDownMenu_AddButton(info, level)
+		-- Have to do this here, because info.disabled cannot be a function.
+		if db.levels then playedTimeLevelButton:Enable() else playedTimeLevelButton:Disable() end
+		wipe(self.info)
+
+		info.text = L["Show class icons"]
 		info.isNotRadio = 1
 		info.checked = self.GetClassIcons
 		info.func = self.SetClassIcons
@@ -741,11 +820,11 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
-		info.text = L["Faction icons"]
+		info.text = L["Show faction icons"]
 		info.hasArrow = 1
 		info.keepShownOnClick = 1
 		info.notCheckable = 1
-		info.menuList = "Faction icons"
+		info.menuList = "Show faction icons"
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
@@ -801,6 +880,15 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
+		info.text = L["Always show minutes also"]
+		info.isNotRadio = 1
+		info.checked = self.GetAlwaysShowMinutes
+		info.func = self.SetAlwaysShowMinutes
+		info.keepShownOnClick = 1
+		UIDropDownMenu_AddButton(info, level)
+		wipe(self.info)
+
+
 		info.text = " "
 		info.disabled = 1
 		info.notCheckable = 1
@@ -815,14 +903,14 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
-		info.text = " "
-		info.disabled = 1
-		info.notCheckable = 1
-		UIDropDownMenu_AddButton(info, level)
-		wipe(self.info)
-
 		-- Do not show this option for users of PlayedTimeMinimapClock.
 		if not TimeManagerClockButton:IsMouseOver() then
+			info.text = " "
+			info.disabled = 1
+			info.notCheckable = 1
+			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
+
 			info.text = L["Broker icon text"]
 			info.hasArrow = 1
 			info.keepShownOnClick = 1
@@ -838,13 +926,12 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
 
-
-
 		info.text = CLOSE
 		info.func = self.CloseDropDownMenus
 		info.notCheckable = 1
 		UIDropDownMenu_AddButton(info, level)
 		wipe(self.info)
+
 
 	elseif level == 2 then
 
@@ -853,13 +940,6 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 			info.text = L["By played time"]
 			info.checked = self.GetSortByPlayedTime
 			info.func = self.SetSortByPlayedTime
-			info.keepShownOnClick = 1
-			UIDropDownMenu_AddButton(info, level)
-			wipe(self.info)
-
-			info.text = L["Sort by played time this level"]
-			info.checked = self.GetSortByPlayedTimeLevel
-			info.func = self.SetSortByPlayedTimeLevel
 			info.keepShownOnClick = 1
 			UIDropDownMenu_AddButton(info, level)
 			wipe(self.info)
@@ -878,7 +958,18 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 			UIDropDownMenu_AddButton(info, level)
 			wipe(self.info)
 
-		elseif menuList == "Faction icons" then
+			info.text = L["Sorting of equal levels"]
+			info.hasArrow = 1
+			info.keepShownOnClick = 1
+			info.notCheckable = 1
+			info.menuList = "Sorting of equal levels"
+			equalLevelSortButton = UIDropDownMenu_AddButton(info, level)
+			-- Have to do this here, because info.disabled cannot be a function.
+			if db.sortByLevel then equalLevelSortButton:Enable() else equalLevelSortButton:Disable() end
+			wipe(self.info)
+
+
+		elseif menuList == "Show faction icons" then
 
 			for k, v in pairs(factionIcons) do
 				if k == false then
@@ -890,12 +981,13 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 				info.func =
 					function()
 						db.factionIcons = k
-						UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+						UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
 					end
 				info.keepShownOnClick = 1
 				UIDropDownMenu_AddButton(info, level)
 				wipe(self.info)
 			end
+
 
 		elseif menuList == "Broker icon text" then
 
@@ -904,7 +996,7 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 			info.func =
 				function()
 					db.brokerTextCurrentChar = not db.brokerTextCurrentChar
-					UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+					UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
 					BrokerPlayedTime:UpdateText()
 				end
 			info.keepShownOnClick = 1
@@ -916,12 +1008,13 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 			info.func =
 				function()
 					db.brokerTextCurrentChar = not db.brokerTextCurrentChar
-					UIDropDownMenu_Refresh(BrokerPlayedTimeMenu)
+					UIDropDownMenu_RefreshAll(BrokerPlayedTimeMenu)
 					BrokerPlayedTime:UpdateText()
 				end
 			info.keepShownOnClick = 1
 			UIDropDownMenu_AddButton(info, level)
 			wipe(self.info)
+
 
 		elseif menuList == "Remove character" then
 			for _, realm in ipairs(sortedRealms) do
@@ -930,51 +1023,80 @@ BrokerPlayedTimeMenu.initialize = function(self, level, menuList)
 				info.hasArrow = 1
 				info.keepShownOnClick = 1
 				info.notCheckable = 1
+				info.menuList = "Remove character"
 				UIDropDownMenu_AddButton(info, level)
 				wipe(self.info)
 			end
 		end
 
+
 	elseif level == 3 then
-		local factions = 0
-		for i, faction in ipairs(sortedFactions) do
-			info.value = nil
-			info.colorCode = nil
-			info.func = nil
-			info.keepShownOnClick = nil
 
-			local realm = UIDROPDOWNMENU_MENU_VALUE
-			local rfp = sortedPlayers[realm][faction]
+		if menuList == "Sorting of equal levels" then
 
-			if rfp then
-				factions = factions + 1
+			info.text = L["By played time this level"]
+			info.checked = self.GetEqualLevelSortByPlayedTimeLevel
+			info.func = self.SetEqualLevelSortByPlayedTimeLevel
+			info.keepShownOnClick = 1
+			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
 
-				-- Insert a blank line.
-				if factions > 1 then
-					info.text = " "
-					info.disabled = 1
-					info.notCheckable = 1
+			info.text = L["By played time"]
+			info.checked = self.GetEqualLevelSortByPlayedTime
+			info.func = self.SetEqualLevelSortByPlayedTime
+			info.keepShownOnClick = 1
+			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
+
+			info.text = L["By character name"]
+			info.checked = self.GetEqualLevelSortAlphabetically
+			info.func = self.SetEqualLevelSortAlphabetically
+			info.keepShownOnClick = 1
+			UIDropDownMenu_AddButton(info, level)
+			wipe(self.info)
+
+
+		elseif menuList == "Remove character" then
+			local factions = 0
+			for i, faction in ipairs(sortedFactions) do
+				info.value = nil
+				info.colorCode = nil
+				info.func = nil
+				info.keepShownOnClick = nil
+
+				local realm = UIDROPDOWNMENU_MENU_VALUE
+				local rfp = sortedPlayers[realm][faction]
+
+				if rfp and #rfp > 0 then
+					factions = factions + 1
+
+					-- Insert a blank line.
+					if factions > 1 then
+						info.text = " "
+						info.disabled = 1
+						info.notCheckable = 1
+						UIDropDownMenu_AddButton(info, level)
+						wipe(self.info)
+					end
+
+					info.disabled = nil
+
+					info.text = faction
+					info.isTitle = 1
 					UIDropDownMenu_AddButton(info, level)
 					wipe(self.info)
-				end
 
-				info.disabled = nil
+					for j, name in ipairs(rfp) do
+						local cdata = db[realm][faction][name]
 
-				info.text = faction
-				info.isTitle = 1
-				UIDropDownMenu_AddButton(info, level)
-				wipe(self.info)
-
-				for j, name in ipairs(rfp) do
-					local cdata = db[realm][faction][name]
-
-					info.text = name
-					info.value = format("%s#%s#%s", realm, faction, name)
-					info.colorCode = CLASS_COLORS[cdata and cdata.class or "UNKNOWN"]
-					info.disabled = (name == currentPlayer and realm == currentRealm)
-					info.func = self.RemoveCharacter
-					UIDropDownMenu_AddButton(info, level)
-					wipe(self.info)
+						info.text = name
+						info.value = format("%s#%s#%s", realm, faction, name)
+						info.colorCode = CLASS_COLORS[cdata and cdata.class or "UNKNOWN"]
+						info.disabled = (name == currentPlayer and realm == currentRealm)
+						info.func = self.RemoveCharacter
+						UIDropDownMenu_AddButton(info, level)
+						wipe(self.info)
+					end
 				end
 			end
 		end
@@ -1016,9 +1138,9 @@ local function AddPlayerLines(tooltip, realm, names, firstIndex, lastIndex)
 							CLASS_COLORS[data.class] or GRAY,
 							(db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. math.floor(tooltipLineHeight) .. "|t" or "",
 							name,
-							db.levels and " ("..data.level..": "..FormatTime(charTimeLevel, true)..")" or ""
+							db.levels and (" (" .. data.level .. (db.showPlayedTimeLevel and (": " .. FormatTime(charTimeLevel, not db.alwaysShowMinutes)) or "") .. ")") or ""
 						),
-						FormatTime(charTime)
+						FormatTime(charTime, not db.alwaysShowMinutes)
 					)
 
 					totalTime = totalTime + charTime
@@ -1045,7 +1167,7 @@ local function OnTooltipShow(tooltip)
 	if not tooltipLineHeight then
 		GetTooltipLineHeight()
 	end
-	
+
 	-- Estimate how many tooltips we need.
 	local tooltipInitialHeight = 0
 	local initialNumLines = tooltip:NumLines()
@@ -1061,6 +1183,7 @@ local function OnTooltipShow(tooltip)
 
 	local lineCounter = 0
 	lineCounter = lineCounter + 1	 					-- tooltip:AddLine(L["Played Time"])
+	lineCounter = lineCounter + 1	 					-- tooltip:AddLine(L["Right click for settings"])
 
 	for _, realm in ipairs(sortedRealms) do
 		lineCounter = lineCounter + 1					-- tooltip:AddLine(" ")
@@ -1096,6 +1219,7 @@ local function OnTooltipShow(tooltip)
 	if estimatedHeight <= allowedHeight then
 		local totalTime = 0
 		tooltip:AddLine(L["Played Time"])
+		tooltip:AddLine("|cffa8a8a8(" .. L["Right click for settings"] .. ")|r")
 		for _, realm in ipairs(sortedRealms) do
 			tooltip:AddLine(" ")
 			if #sortedRealms > 1 then
@@ -1112,7 +1236,7 @@ local function OnTooltipShow(tooltip)
 		end
 
 		tooltip:AddLine(" ")
-		tooltip:AddDoubleLine(L["Total"], FormatTime(totalTime))
+		tooltip:AddDoubleLine(L["Total"], FormatTime(totalTime, not db.alwaysShowMinutes))
 
 		tooltip:Show()
 		-- print("real height", tooltip:GetHeight(), tooltip:NumLines())
@@ -1274,6 +1398,7 @@ local function OnTooltipShow(tooltip)
 
 
 		currentTooltip:AddLine(L["Played Time"])
+		currentTooltip:AddLine("|cffa8a8a8(" .. L["Right click for settings"] .. ")|r")
 		currentTooltip:AddLine(" ")
 		lineCounter = lineCounter + 2
 
@@ -1368,8 +1493,7 @@ local function OnTooltipShow(tooltip)
 
 
 		currentTooltip:AddLine(" ")
-		currentTooltip:AddDoubleLine(L["Total"], FormatTime(totalTime))
-
+		currentTooltip:AddDoubleLine(L["Total"], FormatTime(totalTime, not db.alwaysShowMinutes))
 
 		currentTooltip:Show()
 		local currentTooltipHeight = currentTooltip:GetHeight()
@@ -1438,7 +1562,7 @@ function BrokerPlayedTime:UpdateText()
 			end
 		end
 	end
-	self.dataObject.text = FormatTime(timeToPrint, timeToPrint > 3600)
+	self.dataObject.text = FormatTime(timeToPrint, (not db.alwaysShowMinutes) and (timeToPrint > 3600) )
 end
 
 do
@@ -1449,11 +1573,10 @@ do
 	end
 	function BrokerPlayedTime:SetUpdateInterval(fast)
 		local alreadyRunning = updateDelay
-		updateDelay = fast and 30 or 300
+		updateDelay = (db.alwaysShowMinutes or fast) and 10 or 60
 		if not alreadyRunning then
 			C_Timer.After(updateDelay, UpdateText)
 		end
 	end
 end
 
-------------------------------------------------------------------------
