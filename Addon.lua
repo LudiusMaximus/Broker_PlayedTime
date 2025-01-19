@@ -462,7 +462,7 @@ function GetTooltipLineHeight()
 
 	-- print(math.floor((tooltipHeight2 + lineHeight) * 10000), "should equal", math.floor(tooltipHeight3 * 10000))
 
-	if math.floor((tooltipHeight2 + lineHeight - tooltipHeight3) * 10000) == 0 then
+	if math.floor((tooltipHeight2 + lineHeight - tooltipHeight3) * 1000) == 0 then
 		tooltipLineHeight = lineHeight
 		tooltipTopBottomPadding = tooltipHeight1 - lineHeight
 	else
@@ -1160,7 +1160,7 @@ end
 
 
 
-
+local fallBackWarningGiven = false
 
 local function OnTooltipShow(tooltip)
 
@@ -1208,7 +1208,17 @@ local function OnTooltipShow(tooltip)
 	lineCounter = lineCounter + 1	 			-- tooltip:AddDoubleLine(L["Total"], FormatTime(total))
 
 
-	local estimatedHeight = tooltipInitialHeight + lineCounter*tooltipLineHeight
+
+	-- If we were not able to determine tooltipLineHeight, there is something messed up with this user's tooltip.
+	-- No better solution yet than to not use multiple tooltips.
+	local estimatedHeight = 0
+	if tooltipLineHeight then
+		estimatedHeight = tooltipInitialHeight + lineCounter*tooltipLineHeight
+	elseif not fallBackWarningGiven then
+		print(ADDON, "could not determine your tooltip line height. Falling back to single tooltip view.")
+		fallBackWarningGiven = true
+	end
+
 	-- print("estimatedHeight", estimatedHeight)
 
 	local allowedHeight = 0.7 * UIParent:GetHeight()
