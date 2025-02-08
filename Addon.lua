@@ -21,6 +21,7 @@ local currentPlayer = UnitName("player")
 local currentRealm = GetRealmName()
 
 -- With 14 the lines get bigger than blank lines.
+-- TODO: Make it math.floor(tooltipLineHeight)
 local textIconSize = 13
 
 local factionIcons = {
@@ -1217,6 +1218,7 @@ local function OnTooltipShow(tooltip)
 	elseif not fallBackWarningGiven then
 		print(ADDON, "could not determine your tooltip line height. Falling back to single tooltip view.")
 		fallBackWarningGiven = true
+		tooltipLineHeight = 13
 	end
 
 	-- print("estimatedHeight", estimatedHeight)
