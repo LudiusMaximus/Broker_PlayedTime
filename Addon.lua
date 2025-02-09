@@ -461,9 +461,9 @@ function GetTooltipLineHeight()
 	local tooltipHeight3 = testTooltip:GetHeight()
 	testTooltip:Hide()
 
-	-- print(math.floor((tooltipHeight2 + lineHeight) * 10000), "should equal", math.floor(tooltipHeight3 * 10000))
+	-- print(math.floor((tooltipHeight2 + lineHeight) * 1000), "should equal", math.floor(tooltipHeight3 * 1000))
 
-	if math.floor((tooltipHeight2 + lineHeight - tooltipHeight3) * 1000) == 0 then
+	if math.floor((tooltipHeight2 + lineHeight) * 1000) - math.floor(tooltipHeight3 * 1000) == 0 then
 		tooltipLineHeight = lineHeight
 		tooltipTopBottomPadding = tooltipHeight1 - lineHeight
 	else
@@ -1137,7 +1137,7 @@ local function AddPlayerLines(tooltip, realm, names, firstIndex, lastIndex)
 							factionIcons[db.factionIcons][mapPlayerToFaction[realm][name]],
 							db.classIcons and classIcons[data.class] or "",
 							CLASS_COLORS[data.class] or GRAY,
-							(db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. math.floor(tooltipLineHeight) .. "|t" or "",
+							(db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. (tooltipLineHeight and math.floor(tooltipLineHeight) or "13") .. "|t" or "",
 							name,
 							db.levels and (" (" .. data.level .. (db.showPlayedTimeLevel and (": " .. FormatTime(charTimeLevel, not db.alwaysShowMinutes)) or "") .. ")") or ""
 						),
@@ -1218,7 +1218,6 @@ local function OnTooltipShow(tooltip)
 	elseif not fallBackWarningGiven then
 		print(ADDON, "could not determine your tooltip line height. Falling back to single tooltip view.")
 		fallBackWarningGiven = true
-		tooltipLineHeight = 13
 	end
 
 	-- print("estimatedHeight", estimatedHeight)
