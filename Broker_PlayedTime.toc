@@ -1,6 +1,7 @@
-## Interface: 110107
+## Interface: 110200
 ## Version: @project-version@
 ## Title: Broker: Played Time
+## IconTexture: interface/icons/spell_nature_timestop.blp
 ## Author: Phanx, LudiusMaximus
 ## Notes: DataBroker plugin to track played time across all your characters.
 ## Notes-deDE: DataBroker-Plugin, um die gesamt gespielte Zeit deiner Charaktere zu verfolgen.
