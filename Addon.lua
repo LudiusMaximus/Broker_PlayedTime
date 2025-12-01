@@ -631,6 +631,7 @@ local function OpenMenu()
         db.sortByPlayedTime = true
         db.sortByLevel = false
         BuildSortedLists()
+        return MenuResponse.Refresh
       end)
 
     sortingSubmenu:CreateRadio(L["By character name"],
@@ -639,6 +640,7 @@ local function OpenMenu()
         db.sortByPlayedTime = false
         db.sortByLevel = false
         BuildSortedLists()
+        return MenuResponse.Refresh
       end)
 
     sortingSubmenu:CreateRadio(L["By character level"],
@@ -647,6 +649,7 @@ local function OpenMenu()
         db.sortByPlayedTime = false
         db.sortByLevel = true
         BuildSortedLists()
+        return MenuResponse.Refresh
       end)
 
     -- Nested: Sorting of equal levels
@@ -660,6 +663,7 @@ local function OpenMenu()
           db.equalLevelSortByPlayedTime = false
           db.equalLevelSortByPlayedTimeLevel = true
           BuildSortedLists()
+          return MenuResponse.Refresh
         end)
 
       equalLevelSubmenu:CreateRadio(L["By played time"],
@@ -668,6 +672,7 @@ local function OpenMenu()
           db.equalLevelSortByPlayedTime = true
           db.equalLevelSortByPlayedTimeLevel = false
           BuildSortedLists()
+          return MenuResponse.Refresh
         end)
 
       equalLevelSubmenu:CreateRadio(L["By character name"],
@@ -676,6 +681,7 @@ local function OpenMenu()
           db.equalLevelSortByPlayedTime = false
           db.equalLevelSortByPlayedTimeLevel = false
           BuildSortedLists()
+          return MenuResponse.Refresh
         end)
     end
 
@@ -717,6 +723,7 @@ local function OpenMenu()
         function() return db.factionIcons == k end,
         function()
           db.factionIcons = k
+          return MenuResponse.Refresh
         end)
     end
 
@@ -835,6 +842,7 @@ local function OpenMenu()
         function()
           db.brokerTextCurrentChar = true
           BrokerPlayedTime:UpdateText()
+          return MenuResponse.Refresh
         end)
 
       brokerTextSubmenu:CreateRadio(L["Total time"],
@@ -842,6 +850,7 @@ local function OpenMenu()
         function()
           db.brokerTextCurrentChar = false
           BrokerPlayedTime:UpdateText()
+          return MenuResponse.Refresh
         end)
 
     end
