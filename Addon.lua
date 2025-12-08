@@ -571,13 +571,14 @@ end
 
 local requesting
 
-local o = ChatFrame_DisplayTimePlayed
-ChatFrame_DisplayTimePlayed = function(...)
+-- Hook ChatFrameUtil.DisplayTimePlayed to suppress the message when we request it
+local originalDisplayTimePlayed = ChatFrameUtil.DisplayTimePlayed
+function ChatFrameUtil.DisplayTimePlayed(chatFrame, totalTime, levelTime)
   if requesting then
     requesting = false
-    return
+    return  -- Suppress the message display
   end
-  return o(...)
+  return originalDisplayTimePlayed(chatFrame, totalTime, levelTime)
 end
 
 function BrokerPlayedTime:UpdateTimePlayed()
