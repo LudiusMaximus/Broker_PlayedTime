@@ -571,14 +571,27 @@ end
 
 local requesting
 
--- Hook ChatFrameUtil.DisplayTimePlayed to suppress the message when we request it
-local originalDisplayTimePlayed = ChatFrameUtil.DisplayTimePlayed
-function ChatFrameUtil.DisplayTimePlayed(chatFrame, totalTime, levelTime)
-  if requesting then
-    requesting = false
-    return  -- Suppress the message display
+-- Hook the appropriate display function based on WoW version
+if ChatFrameUtil and ChatFrameUtil.DisplayTimePlayed then
+  -- Retail: Hook ChatFrameUtil.DisplayTimePlayed
+  local originalDisplayTimePlayed = ChatFrameUtil.DisplayTimePlayed
+  function ChatFrameUtil.DisplayTimePlayed(chatFrame, totalTime, levelTime)
+    if requesting then
+      requesting = false
+      return  -- Suppress the message display
+    end
+    return originalDisplayTimePlayed(chatFrame, totalTime, levelTime)
   end
-  return originalDisplayTimePlayed(chatFrame, totalTime, levelTime)
+else
+  -- Classic: Hook ChatFrame_DisplayTimePlayed
+  local o = ChatFrame_DisplayTimePlayed
+  ChatFrame_DisplayTimePlayed = function(...)
+    if requesting then
+      requesting = false
+      return
+    end
+    return o(...)
+  end
 end
 
 function BrokerPlayedTime:UpdateTimePlayed()
