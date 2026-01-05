@@ -534,6 +534,12 @@ function BrokerPlayedTime:PLAYER_LOGIN()
   RemoveDuplicates()
 
   myDB = db[currentRealm][currentFaction][currentPlayer]
+  
+  -- Needed if you deleted and recreated a character with the same name but different class.  
+  myDB.class = (select(2, UnitClass("player")))
+  -- Needed for deletion/recreation and for level boost (no PLAYER_LEVEL_UP event).
+  myDB.level = UnitLevel("player")
+
 
   PerformLevelSquish()
 
@@ -559,9 +565,6 @@ function BrokerPlayedTime:PLAYER_LOGIN()
   self:RegisterEvent("PLAYER_REGEN_ENABLED")
   self:RegisterEvent("PLAYER_UPDATE_RESTING")
   self:RegisterEvent("TIME_PLAYED_MSG")
-
-  -- Needed for level boost (no PLAYER_LEVEL_UP event).
-  myDB.level = UnitLevel("player")
 
   self:UpdateTimePlayed()
 
