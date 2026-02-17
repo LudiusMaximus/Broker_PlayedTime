@@ -1,8 +1,9 @@
 --[[--------------------------------------------------------------------
   Broker_PlayedTime
   DataBroker plugin to track played time across all your characters.
-  Copyright (c) 2010-2016 Phanx <addons@phanx.net>. All rights reserved.
-  Copyright (c) 2020-2025 Ludius <ludiusmaximus@gmail.com>. All rights reserved.
+  Copyright (c) 2010-2016 Phanx
+  Copyright (c) 2020-2026 Ludius Maximus
+  Licensed under the MIT License (see LICENSE.txt for details).
   https://www.wowinterface.com/downloads/info16711-BrokerPlayedTime.html
   https://www.curseforge.com/wow/addons/broker-playedtime
   https://github.com/LudiusMaximus/Broker_PlayedTime
