@@ -426,43 +426,35 @@ local function PerformLevelSquish()
 end
 
 
--- If players do not fit into one tooltip, we have to start additional ones.
-local additionalTooltips = {}
-
-
--- Using first tooltip of additionalTooltips to calcualte line height.
+-- Dedicated tooltip for measuring line height.
+local measureTooltip = nil
 local tooltipLineHeight = nil
 -- https://warcraft.wiki.gg/wiki/API_GameTooltip_GetPadding only returned 0,0,0,0 for me, so I am getting the "padding" manually.
 -- (The "padding" is the actual padding plus the difference between a normal tooltip line and the slightly greater title line.)
 local tooltipTopBottomPadding = nil
 function GetTooltipLineHeight()
 
-  local testTooltip = additionalTooltips[1]
-
-  if not testTooltip then
-    testTooltip = CreateFrame("GameTooltip", ADDON .. "_AdditionalTooltip" .. "1", UIParent, "SharedTooltipTemplate")
-    tinsert(additionalTooltips, testTooltip)
+  if not measureTooltip then
+    measureTooltip = CreateFrame("GameTooltip", ADDON .. "_MeasureTooltip", UIParent, "SharedTooltipTemplate")
   else
-    testTooltip:ClearLines()
+    measureTooltip:ClearLines()
   end
 
-  testTooltip:SetOwner(UIParent, "ANCHOR_TOPLEFT")
+  measureTooltip:SetOwner(UIParent, "ANCHOR_TOPLEFT")
 
-  testTooltip:AddLine("Title")
-  testTooltip:Show()
-  local tooltipHeight1 = testTooltip:GetHeight()
-  testTooltip:AddLine("Line 1")
-  testTooltip:Show()
-  local tooltipHeight2 = testTooltip:GetHeight()
+  measureTooltip:AddLine("Title")
+  measureTooltip:Show()
+  local tooltipHeight1 = measureTooltip:GetHeight()
+  measureTooltip:AddLine("Line 1")
+  measureTooltip:Show()
+  local tooltipHeight2 = measureTooltip:GetHeight()
   local lineHeight = tooltipHeight2 - tooltipHeight1
 
   -- Check to be on the safe side.
-  testTooltip:AddLine("Line 2")
-  testTooltip:Show()
-  local tooltipHeight3 = testTooltip:GetHeight()
-  testTooltip:Hide()
-
-  -- print(math.floor((tooltipHeight2 + lineHeight) * 1000), "should equal", math.floor(tooltipHeight3 * 1000))
+  measureTooltip:AddLine("Line 2")
+  measureTooltip:Show()
+  local tooltipHeight3 = measureTooltip:GetHeight()
+  measureTooltip:Hide()
 
   if math.floor((tooltipHeight2 + lineHeight) * 1000) - math.floor(tooltipHeight3 * 1000) == 0 then
     tooltipLineHeight = lineHeight
@@ -472,6 +464,336 @@ function GetTooltipLineHeight()
     tooltipTopBottomPadding = nil
   end
 
+end
+
+
+------------------------------------------------------------------------
+-- Multi-column tooltip using a persistent frame with font string pooling.
+------------------------------------------------------------------------
+
+-- The custom frame for multi-column display.
+local multiColumnFrame = nil
+
+-- Font string pool: array of { left = FontString, right = FontString }.
+local fontStringPool = {}
+local fontStringPoolSize = 0
+local fontStringPoolActive = 0
+
+local function InitMultiColumnFrame()
+  if multiColumnFrame then return end
+  multiColumnFrame = CreateFrame("Frame", ADDON .. "_MultiColumnFrame", UIParent, "TooltipBackdropTemplate")
+  multiColumnFrame:SetFrameStrata("TOOLTIP")
+  multiColumnFrame:SetClampedToScreen(true)
+  multiColumnFrame:Hide()
+
+  -- If ElvUI is loaded and its tooltip skin is enabled, match the ElvUI tooltip style.
+  if C_AddOns.IsAddOnLoaded("ElvUI") then
+    local E = unpack(ElvUI or {})
+    if E and E.private and E.private.skins
+        and E.private.skins.blizzard
+        and E.private.skins.blizzard.enable
+        and E.private.skins.blizzard.tooltip
+        and multiColumnFrame.SetTemplate then
+      if multiColumnFrame.NineSlice then
+        multiColumnFrame.NineSlice:SetAlpha(0)
+      end
+      local TT = E:GetModule("Tooltip", true)
+      if TT and TT.db then
+        multiColumnFrame.customBackdropAlpha = TT.db.colorAlpha
+      end
+      multiColumnFrame:SetTemplate("Transparent")
+    end
+  end
+end
+
+local titleFont = nil
+local function GetTitleFont()
+  if not titleFont then
+    titleFont = CreateFont(ADDON .. "_TitleFont")
+    titleFont:CopyFontObject(GameTooltipHeaderText)
+    local path, size, flags = titleFont:GetFont()
+    titleFont:SetFont(path, size + 2, flags)
+  end
+  return titleFont
+end
+
+local function AcquireFontStringPair()
+  fontStringPoolActive = fontStringPoolActive + 1
+  if fontStringPoolActive > fontStringPoolSize then
+    fontStringPoolSize = fontStringPoolActive
+    local left = multiColumnFrame:CreateFontString(nil, "ARTWORK", "GameTooltipText")
+    local right = multiColumnFrame:CreateFontString(nil, "ARTWORK", "GameTooltipText")
+    left:SetJustifyH("LEFT")
+    right:SetJustifyH("RIGHT")
+    fontStringPool[fontStringPoolSize] = { left = left, right = right }
+  end
+  local pair = fontStringPool[fontStringPoolActive]
+  pair.left:Show()
+  pair.right:Show()
+  return pair.left, pair.right
+end
+
+local function ReleaseAllFontStrings()
+  for i = 1, fontStringPoolActive do
+    fontStringPool[i].left:Hide()
+    fontStringPool[i].left:ClearAllPoints()
+    fontStringPool[i].right:Hide()
+    fontStringPool[i].right:ClearAllPoints()
+  end
+  fontStringPoolActive = 0
+end
+
+local function HideMultiColumnFrame()
+  if multiColumnFrame and multiColumnFrame:IsShown() then
+    ReleaseAllFontStrings()
+    multiColumnFrame:Hide()
+  end
+end
+
+-- Line collector: a "virtual tooltip" that captures AddLine/AddDoubleLine calls.
+-- The optional `kind` parameter tags special lines: "title", "realm", "total".
+-- `currentRealm` is a mutable field the caller sets (and later clears) around each
+-- group of character lines. Every DoubleLine added while it is set inherits the realm
+-- name as a `realm` field on its entry. ShowMultiColumnFrame reads those fields to
+-- identify contiguous realm blocks and uses them for the column-balancing algorithm
+-- (avoiding orphan groups at column boundaries).
+local function CreateLineCollector()
+  return {
+    lines = {},
+    currentRealm = nil,
+    AddLine = function(self, text, r, g, b, kind)
+      tinsert(self.lines, { leftText = text, leftR = r, leftG = g, leftB = b, kind = kind })
+    end,
+    AddDoubleLine = function(self, lText, rText, lr, lg, lb, rr, rg, rb, kind)
+      tinsert(self.lines, { leftText = lText, rightText = rText, leftR = lr, leftG = lg, leftB = lb, rightR = rr, rightG = rg, rightB = rb, kind = kind, realm = (not kind) and self.currentRealm or nil })
+    end,
+  }
+end
+
+-- Display collected lines in a multi-column frame anchored to the given tooltip.
+local function ShowMultiColumnFrame(tooltip, collectedLines, numColumns)
+  InitMultiColumnFrame()
+  ReleaseAllFontStrings()
+
+  local numLines = #collectedLines
+  local linesPerColumn = ceil(numLines / numColumns)
+
+  -- Spacing constants.
+  local LINE_SPACING = 1        -- extra pixels between every line
+  local REALM_EXTRA_SPACING = 3 -- additional pixels after a realm or total header
+
+  -- Compute column ranges, balancing realm character blocks.
+  -- Rule: if a column boundary splits a realm with >6 chars such that
+  -- either side has <3 chars, move those chars to the other column.
+  -- If the result would exceed 90% screen height, revert to even distribution.
+  local columnRanges = {}
+  do
+    -- Identify contiguous realm blocks (realm title + character lines).
+    local realmBlocks = {}
+    local lineToBlock = {}
+    local currentBlock = nil
+    for i, line in ipairs(collectedLines) do
+      if line.kind == "realm" then
+        -- Start a new block with the realm title line.
+        -- count only tracks character lines (not the title itself).
+        currentBlock = { startIdx = i, endIdx = i, count = 0, realm = line.leftText }
+        tinsert(realmBlocks, currentBlock)
+        lineToBlock[i] = #realmBlocks
+      elseif line.realm then
+        if currentBlock and currentBlock.realm == line.realm then
+          currentBlock.endIdx = i
+          currentBlock.count = currentBlock.count + 1
+        else
+          currentBlock = { startIdx = i, endIdx = i, count = 1, realm = line.realm }
+          tinsert(realmBlocks, currentBlock)
+        end
+        lineToBlock[i] = #realmBlocks
+      else
+        currentBlock = nil
+      end
+    end
+
+    -- Initial split points (last line index of each column, except the last).
+    local splits = {}
+    for col = 1, numColumns - 1 do
+      splits[col] = min(col * linesPerColumn, numLines)
+    end
+
+    -- Adjust splits to avoid orphan groups (<3 chars at a column boundary).
+    for s = 1, #splits do
+      local splitIdx = splits[s]
+      local blockIdx = lineToBlock[splitIdx]
+      if blockIdx then
+        local block = realmBlocks[blockIdx]
+        if block.count > 6 then
+          local beforeCount = splitIdx - block.startIdx + 1
+          local afterCount = block.endIdx - splitIdx
+          if beforeCount < 3 and block.startIdx > 1 then
+            splits[s] = block.startIdx - 1
+          elseif afterCount > 0 and afterCount < 3 then
+            splits[s] = block.endIdx
+          end
+        end
+      end
+    end
+
+    -- Ensure splits remain sorted and within bounds.
+    for s = 1, #splits do
+      if splits[s] < 1 then splits[s] = 1 end
+      if splits[s] >= numLines then splits[s] = numLines - 1 end
+      if s > 1 and splits[s] <= splits[s-1] then splits[s] = splits[s-1] + 1 end
+    end
+
+    -- Build column ranges.
+    local prevEnd = 0
+    for s = 1, #splits do
+      tinsert(columnRanges, { startIdx = prevEnd + 1, endIdx = splits[s] })
+      prevEnd = splits[s]
+    end
+    tinsert(columnRanges, { startIdx = prevEnd + 1, endIdx = numLines })
+
+    -- If the tallest column would exceed 90% screen height, revert to even distribution.
+    local maxLines = 0
+    for _, r in ipairs(columnRanges) do
+      local count = r.endIdx - r.startIdx + 1
+      if count > maxLines then maxLines = count end
+    end
+    if maxLines * tooltipLineHeight > 0.9 * UIParent:GetHeight() then
+      columnRanges = {}
+      for col = 1, numColumns do
+        local s = (col - 1) * linesPerColumn + 1
+        local e = min(col * linesPerColumn, numLines)
+        tinsert(columnRanges, { startIdx = s, endIdx = e })
+      end
+    end
+  end
+
+  -- Phase 1: Create font strings, set text, measure widths.
+  -- Only "content" lines (those with right-side text) are measured for column sizing;
+  -- this excludes the title, subtitle, spacers, and realm/total headers.
+  local columns = {}
+  for col = 1, numColumns do
+    columns[col] = { pairs = {}, maxLeftWidth = 0, maxRightWidth = 0 }
+
+    for idx = columnRanges[col].startIdx, columnRanges[col].endIdx do
+      local lineData = collectedLines[idx]
+      local leftFS, rightFS = AcquireFontStringPair()
+
+      -- Title uses an extra-large font. Realm/total use header font. All get NORMAL_FONT_COLOR.
+      if lineData.kind == "title" then
+        leftFS:SetFontObject(GetTitleFont())
+        rightFS:SetFontObject(GetTitleFont())
+        leftFS:SetTextColor(NORMAL_FONT_COLOR:GetRGB())
+        rightFS:SetTextColor(NORMAL_FONT_COLOR:GetRGB())
+      elseif lineData.kind == "realm" or lineData.kind == "total" then
+        leftFS:SetFontObject(GameTooltipHeaderText)
+        rightFS:SetFontObject(GameTooltipHeaderText)
+        leftFS:SetTextColor(NORMAL_FONT_COLOR:GetRGB())
+        rightFS:SetTextColor(NORMAL_FONT_COLOR:GetRGB())
+      else
+        leftFS:SetFontObject(GameTooltipText)
+        rightFS:SetFontObject(GameTooltipText)
+      end
+
+      leftFS:SetText(lineData.leftText or "")
+      rightFS:SetText(lineData.rightText or "")
+
+      -- Override colors when explicit values were provided by the caller.
+      if lineData.leftR then
+        leftFS:SetTextColor(lineData.leftR, lineData.leftG, lineData.leftB)
+      end
+      if lineData.rightR then
+        rightFS:SetTextColor(lineData.rightR, lineData.rightG, lineData.rightB)
+      end
+
+      -- Only content lines (with right-side text, but not the "total" header)
+      -- contribute to column width, since they represent the actual data rows.
+      if lineData.rightText and lineData.kind ~= "total" then
+        local lw = leftFS:GetUnboundedStringWidth()
+        local rw = rightFS:GetUnboundedStringWidth()
+        if lw > columns[col].maxLeftWidth then columns[col].maxLeftWidth = lw end
+        if rw > columns[col].maxRightWidth then columns[col].maxRightWidth = rw end
+      end
+
+      tinsert(columns[col].pairs, { left = leftFS, right = rightFS, kind = lineData.kind })
+    end
+  end
+
+  -- Phase 2: Calculate frame dimensions using global max left/right widths.
+  local PADDING_H = 14
+  local PADDING_V = tooltipTopBottomPadding or 14
+  local COLUMN_GAP = 34
+  local TEXT_GAP = 12   -- gap between left and right text within a column
+
+  local globalMaxLeftWidth = 0
+  local globalMaxRightWidth = 0
+  for col = 1, numColumns do
+    if columns[col].maxLeftWidth > globalMaxLeftWidth then globalMaxLeftWidth = columns[col].maxLeftWidth end
+    if columns[col].maxRightWidth > globalMaxRightWidth then globalMaxRightWidth = columns[col].maxRightWidth end
+  end
+  local colWidth = globalMaxLeftWidth + TEXT_GAP + globalMaxRightWidth
+  local totalWidth = PADDING_H * 2 + colWidth * numColumns + COLUMN_GAP * (numColumns - 1)
+
+  -- Compute tallest column height, accounting for per-line and post-realm spacing.
+  local maxColHeight = 0
+  for col = 1, numColumns do
+    local h = 0
+    for _, pair in ipairs(columns[col].pairs) do
+      h = h + tooltipLineHeight + LINE_SPACING
+      if pair.kind == "realm" then h = h + REALM_EXTRA_SPACING end
+    end
+    if h > maxColHeight then maxColHeight = h end
+  end
+  local totalHeight = PADDING_V + maxColHeight
+
+  -- Phase 3: Position all font strings using accumulated y-offsets.
+  local x = PADDING_H
+  for col = 1, numColumns do
+    local yOffset = -(PADDING_V / 2)
+    for _, pair in ipairs(columns[col].pairs) do
+      pair.left:SetPoint("TOPLEFT", multiColumnFrame, "TOPLEFT", x, yOffset)
+      pair.right:SetPoint("TOPRIGHT", multiColumnFrame, "TOPLEFT", x + colWidth, yOffset)
+      yOffset = yOffset - (tooltipLineHeight + LINE_SPACING)
+      if pair.kind == "realm" then yOffset = yOffset - REALM_EXTRA_SPACING end
+    end
+    x = x + colWidth + COLUMN_GAP
+  end
+
+  -- Phase 4: Size and anchor the frame.
+  multiColumnFrame:SetSize(totalWidth, totalHeight)
+  multiColumnFrame:ClearAllPoints()
+
+  -- Anchor based on cursor position (left half → extend right, right half → extend left).
+  if UIParent:GetWidth() * UIParent:GetEffectiveScale() / GetCursorPosition() > 2 then
+    multiColumnFrame:SetPoint("TOPLEFT", tooltip, "TOPLEFT")
+  else
+    multiColumnFrame:SetPoint("TOPRIGHT", tooltip, "TOPRIGHT")
+  end
+
+  multiColumnFrame:SetFrameLevel(tooltip:GetFrameLevel() + 10)
+
+  -- If ElvUI-skinned, update backdrop alpha to match the current tooltip opacity setting.
+  if multiColumnFrame.template == "Transparent" and ElvUI then
+    local E = unpack(ElvUI)
+    if E then
+      local TT = E:GetModule("Tooltip", true)
+      if TT and TT.db then
+        local r, g, b = multiColumnFrame:GetBackdropColor()
+        multiColumnFrame:SetBackdropColor(r, g, b, TT.db.colorAlpha)
+      end
+    end
+  end
+
+  multiColumnFrame:Show()
+
+  -- Hook tooltip OnHide to hide our frame.
+  if not tooltip.BrokerPlayedTime_hooked then
+    tooltip:HookScript("OnHide", HideMultiColumnFrame)
+    tooltip.BrokerPlayedTime_hooked = true
+  end
+
+  -- Keep the original tooltip minimal (one blank line so it stays shown by the host).
+  tooltip:AddLine(" ")
 end
 
 ------------------------------------------------------------------------
@@ -626,13 +948,6 @@ function BrokerPlayedTime:TIME_PLAYED_MSG(t, l)
 end
 
 ------------------------------------------------------------------------
-
--- Remembering these buttons so we can dynamically enable and disable them.
--- As info.disabled cannot be a function, UIDropDownMenu_RefreshAll()
--- does not refresh the disabled state.
-local equalLevelSortButton
-local playedTimeLevelButton
-
 
 local function OpenMenu()
   MenuUtil.CreateContextMenu(UIParent, function(button, mainMenu)
@@ -908,7 +1223,7 @@ local function AddPlayerLines(tooltip, realm, names, firstIndex, lastIndex)
             format("%s%s%s%s%s%s|r",
               factionIcons[db.factionIcons][mapPlayerToFaction[realm][name]],
               db.classIcons and classIcons[data.class] or "",
-              CLASS_COLORS[data.class] or GRAY,
+              CLASS_COLORS[data.class] or CLASS_COLORS["UNKNOWN"],
               (db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. (tooltipLineHeight and math.floor(tooltipLineHeight) or "13") .. "|t" or "",
               name,
               db.levels and (" (" .. data.level .. (db.showPlayedTimeLevel and (": " .. FormatTime(charTimeLevel, not db.alwaysShowMinutes)) or "") .. ")") or ""
@@ -1026,275 +1341,57 @@ local function OnTooltipShow(tooltip)
 
 
   -- #########################################################################
-  -- We need several tooltips.
+  -- We need several columns. Use custom multi-column frame.
   else
 
-    -- Create the additional tooltips.
-    local numNeededTooltips = ceil(estimatedHeight / allowedHeight)
-    -- print("numNeededTooltips", numNeededTooltips)
+    local numColumns = ceil(estimatedHeight / allowedHeight)
 
-    -- Make all tooltips equally long.
-    -- Each of the numNeededTooltips - 1 additional tooltips adds tooltipTopBottomPadding plus one tooltipLineHeight (blank title line) to the estimated height.
-    -- If there is a new realm at the beginning of an additional tooltip, the extra tooltipLineHeight corresponds to the blank line preceding the realm name.
-    -- Hence, allowedHeight is slightly too great. But this is OK, as we are fine with the last additinal tooltip not being fully filled.
-    allowedHeight = (estimatedHeight + (numNeededTooltips - 1)*(tooltipTopBottomPadding + tooltipLineHeight)) / numNeededTooltips
-    -- print("distributed allowedHeight", allowedHeight)
+    -- Collect all lines into a virtual tooltip.
+    local collector = CreateLineCollector()
 
-
-    -- Store the maximum tooltip height to make them all equally high.
-    local maxTooltipHeight = 0
-
-    for i = 1, numNeededTooltips-1 do
-      if not additionalTooltips[i] then
-        additionalTooltips[i] = CreateFrame("GameTooltip", ADDON .. "_AdditionalTooltip" .. i .. "asdas", UIParent, "SharedTooltipTemplate")
-      end
-    end
-
-    -- To hide additional tootips with original tooltip.
-    if not tooltip.BrokerPlayedTime_hooked then
-      tooltip:HookScript("OnHide", function()
-        for _, v in pairs(additionalTooltips) do
-          if v:IsShown() then
-            v:Hide()
-          end
-        end
-      end)
-      tooltip.BrokerPlayedTime_hooked = true
-    end
-
-
-    -- The tootips in the order we will use them!
-    local tooltipsInOrder = {}
-
-    -- #########################################################################
-    -- Decide whether to append additional tooltips left or right.
-    if UIParent:GetWidth() * UIParent:GetEffectiveScale() / GetCursorPosition() > 2 then
-      -- print("Cursor is in LEFT side of screen")
-      -- Original tooltip stays leftmost.
-      tooltipsInOrder[1] = tooltip
-
-      -- Additional tooltips get appended right.
-      for i = 1, numNeededTooltips-1 do
-
-        local tooltipOwner = i == 1 and tooltip or additionalTooltips[i-1]
-        if tooltipOwner ~= additionalTooltips[i]:GetOwner() then
-          -- SetOwner() performs ClearAllPoints() and ClearLines() as well.
-          additionalTooltips[i]:SetOwner(tooltipOwner, "ANCHOR_NONE")
-          additionalTooltips[i]:SetPoint("TOPLEFT", tooltipOwner, "TOPRIGHT", -3, 0)
+    -- If the host tooltip already had content (e.g. minimap clock), copy it first
+    -- so it stays at the top, before our title and character data.
+    -- The first line gets GameTooltipHeaderText font, matching its role as a header.
+    if initialNumLines > 0 then
+      local tooltipName = tooltip:GetName()
+      for i = 1, initialNumLines do
+        local lText = _G[tooltipName .. "TextLeft" .. i]:GetText()
+        local lR, lG, lB = _G[tooltipName .. "TextLeft" .. i]:GetTextColor()
+        local rText = _G[tooltipName .. "TextRight" .. i]:GetText()
+        local rR, rG, rB = _G[tooltipName .. "TextRight" .. i]:GetTextColor()
+        if rText and rText ~= "" then
+          collector:AddDoubleLine(lText, rText, lR, lG, lB, rR, rG, rB, i == 1 and "total" or nil)
         else
-          additionalTooltips[i]:ClearLines()
+          collector:AddLine(lText, lR, lG, lB, i == 1 and "total" or nil)
         end
-
-        tooltipsInOrder[i+1] = additionalTooltips[i]
       end
-
-    -- #########################################################################
-    else
-      -- print("Cursor is in RIGHT side of screen")
-      -- Original tooltip becomes rightmost.
-      -- (Changing the anchor points did not work, clearing and reusing original tooltip worked.)
-      tooltipsInOrder[numNeededTooltips] = tooltip
-
-      -- Additional tooltips get appended left.
-      for i = numNeededTooltips-1, 1, -1  do
-
-        local tooltipOwner = i == numNeededTooltips-1 and tooltip or additionalTooltips[i+1]
-        if tooltipOwner ~= additionalTooltips[i]:GetOwner() then
-          -- SetOwner() performs ClearAllPoints() and ClearLines() as well.
-          additionalTooltips[i]:SetOwner(tooltipOwner, "ANCHOR_NONE")
-          additionalTooltips[i]:SetPoint("TOPRIGHT", tooltipOwner, "TOPLEFT", 3, 0)
-        else
-          additionalTooltips[i]:ClearLines()
-        end
-
-        tooltipsInOrder[i] = additionalTooltips[i]
-      end
-
-
-      -- Copy content (if any) of original tooltip to the leftmost additional tooltip.
-      if initialNumLines > 0 then
-
-        local leftText,  leftTextR,  leftTextG,  leftTextB  = {}, {}, {}, {}
-        local rightText, rightTextR, rightTextG, rightTextB = {}, {}, {}, {}
-
-        for i = 1, initialNumLines do
-          leftText[i] = _G[tooltip:GetName().."TextLeft"..i]:GetText()
-          leftTextR[i], leftTextG[i], leftTextB[i] = _G[tooltip:GetName().."TextLeft"..i]:GetTextColor()
-          rightText[i] = _G[tooltip:GetName().."TextRight"..i]:GetText()
-          rightTextR[i], rightTextG[i], rightTextB[i] = _G[tooltip:GetName().."TextRight"..i]:GetTextColor()
-          -- print(i, leftText[i], rightText[i], leftTextR[i], leftTextG[i], leftTextB[i], rightTextR[i], rightTextG[i], rightTextB[i])
-        end
-
-        for i = 1, initialNumLines do
-          -- print(i, leftText[i], rightText[i], leftTextR[i], leftTextG[i], leftTextB[i], rightTextR[i], rightTextG[i], rightTextB[i])
-          if rightText then
-            tooltipsInOrder[1]:AddDoubleLine(leftText[i], rightText[i], leftTextR[i], leftTextG[i], leftTextB[i], rightTextR[i], rightTextG[i], rightTextB[i])
-          else
-            tooltipsInOrder[1]:AddLine(leftText[i], leftTextR[i], leftTextG[i], leftTextB[i], true)
-          end
-        end
-
-        -- Clear original tooltip.
-        tooltip:ClearLines()
-
-      end
-
     end
 
-
-
-    -- #########################################################################
-    -- Start filling the tooltips.
-
-
-
-    local lineCounter = 0
-    local currentTooltipIndex = 1
-    local currentTooltip = tooltipsInOrder[currentTooltipIndex]
-    -- currentTooltip:AddLine("This is tooltip" .. currentTooltipIndex .. " " .. (currentTooltip:GetName() and currentTooltip:GetName() or "no name"))
-
-    local tooltipLinesLeft = nil
-
-    -- Function to skip to the next tooltip. Resetting all values accordingly.
-    local function NextTooltip()
-      -- If we unexpectedly hit the end of the last tooltip, we continue!
-      if currentTooltipIndex == numNeededTooltips then return end
-
-      currentTooltip:Show()
-      local currentTooltipHeight = currentTooltip:GetHeight()
-      if currentTooltipHeight > maxTooltipHeight then
-        maxTooltipHeight = currentTooltipHeight
-      end
-
-      -- print("------------- change from tooltip", currentTooltipIndex, "to", currentTooltipIndex + 1)
-      currentTooltipIndex = currentTooltipIndex + 1
-      currentTooltip = tooltipsInOrder[currentTooltipIndex]
-      -- currentTooltip:AddLine("This is tooltip" .. currentTooltipIndex .. " " .. (currentTooltip:GetName() and currentTooltip:GetName() or "no name"))
-
-      tooltipInitialHeight = tooltipTopBottomPadding
-
-      -- Add a blank line to skip title of additional tooltips.
-      currentTooltip:AddLine(" ")
-      lineCounter = 1
-      tooltipLinesLeft = floor((allowedHeight - (tooltipInitialHeight + tooltipLineHeight)) / tooltipLineHeight)
-    end
-
-
-    currentTooltip:AddLine(L["Played Time"])
-    currentTooltip:AddLine("|cffa8a8a8(" .. L["Right click for options"] .. ")|r")
-    currentTooltip:AddLine(" ")
-    lineCounter = lineCounter + 2
+    collector:AddLine(L["Played Time"], nil, nil, nil, "title")
+    collector:AddLine("|cffa8a8a8(" .. L["Right click for options"] .. ")|r")
 
     local totalTime = 0
     for _, realm in ipairs(sortedRealms) do
-
-      -- Starting character list of a new realm.
-
-      -- How many lines do still fit on the current tooltip?
-      tooltipLinesLeft = floor((allowedHeight - (tooltipInitialHeight + lineCounter*tooltipLineHeight)) / tooltipLineHeight)
-      -- print("++", realm, "tooltipLinesLeft", tooltipLinesLeft)
-
-      -- Only start a new realm at the end of a tooltip, if we have at least space for 4 lines: blank, realm name, 2 characters
-      -- Otherwise, continue with next tooltip.
-      if tooltipLinesLeft < 4 then
-        NextTooltip()
-      end
-
-      -- Only add realm name, if there are more than one.
+      collector:AddLine(" ")
       if #sortedRealms > 1 then
-        -- Add a blank line before starting a new realm, unless this is the first line of a tooltip.
-        if (currentTooltipIndex == 1 and lineCounter > 2) or (currentTooltipIndex > 1 and lineCounter > 1) then
-          currentTooltip:AddLine(" ")
-          lineCounter = lineCounter + 1
-        end
-        currentTooltip:AddLine(realm)
-        lineCounter = lineCounter + 1
+        collector:AddLine(realm, nil, nil, nil, "realm")
       end
-
-
-      local function TooltipSkippingCharacterPrint(listOfCharacterNames, minRest)
-
-        if not minRest then minRest = 2 end
-
-        local charactersToPrint = #listOfCharacterNames
-        -- print("---", realm, "charactersToPrint", charactersToPrint)
-
-        local firstIndex = 1
-        local lastIndex = #listOfCharacterNames
-
-        while charactersToPrint > 0 do
-
-          -- print("in loop charactersToPrint", charactersToPrint)
-          -- print("in loop tooltipLinesLeft", tooltipLinesLeft)
-
-          tooltipLinesLeft = floor((allowedHeight - (tooltipInitialHeight + lineCounter*tooltipLineHeight)) / tooltipLineHeight)
-          -- Only print as many characters as there are lines left.
-          -- But only if there are more than minRest characters left to be printed on the next tooltip.
-          if tooltipLinesLeft > 0 and tooltipLinesLeft < charactersToPrint and (charactersToPrint - tooltipLinesLeft > minRest) then
-            -- print(charactersToPrint, "characters", "are too many for", tooltipLinesLeft)
-            lastIndex = tooltipLinesLeft
-          end
-
-          -- print("printing", firstIndex, "to", lastIndex, "on", currentTooltip:GetName())
-          totalTime = totalTime + AddPlayerLines(currentTooltip, realm, listOfCharacterNames, firstIndex, lastIndex)
-          lineCounter = lineCounter + (lastIndex - firstIndex + 1)
-
-          -- Are we skipping a tooltip?
-          if lastIndex == tooltipLinesLeft then
-            NextTooltip()
-          end
-
-          charactersToPrint = charactersToPrint - lastIndex
-          -- Prepare indexes for next iteration, if there is one.
-          if charactersToPrint > 0 then
-            firstIndex = lastIndex + 1
-            lastIndex = #listOfCharacterNames
-          end
-
-        end
-
-      end
-
-
+      collector.currentRealm = realm
 
       if db.groupByFactions then
-        for i, faction in ipairs(sortedFactions) do
-          -- Not every realm has every faction.
-          if sortedPlayers[realm][faction] then
-            if i < #sortedFactions then
-              TooltipSkippingCharacterPrint(sortedPlayers[realm][faction], 0)
-            else
-              TooltipSkippingCharacterPrint(sortedPlayers[realm][faction], 2)
-            end
-          end
+        for _, faction in ipairs(sortedFactions) do
+          totalTime = totalTime + AddPlayerLines(collector, realm, sortedPlayers[realm][faction])
         end
       else
-        TooltipSkippingCharacterPrint(sortedPlayersNoFactions[realm], 2)
+        totalTime = totalTime + AddPlayerLines(collector, realm, sortedPlayersNoFactions[realm])
       end
-
     end
+    collector.currentRealm = nil
 
+    collector:AddLine(" ")
+    collector:AddDoubleLine(L["Total"], FormatTime(totalTime, not db.alwaysShowMinutes), nil, nil, nil, nil, nil, nil, "total")
 
-    currentTooltip:AddLine(" ")
-    currentTooltip:AddDoubleLine(L["Total"], FormatTime(totalTime, not db.alwaysShowMinutes))
-
-    currentTooltip:Show()
-    local currentTooltipHeight = currentTooltip:GetHeight()
-    if currentTooltipHeight > maxTooltipHeight then
-      maxTooltipHeight = currentTooltipHeight
-    end
-
-
-    -- Make all tooltips equally high.
-    -- GameTooltip gets automatically reset. So we have to increase its size by blank lines.
-    while GameTooltip:GetHeight() < maxTooltipHeight do
-      GameTooltip:AddLine(" ")
-      GameTooltip:Show()
-    end
-    maxTooltipHeight = GameTooltip:GetHeight()
-    for _, k in pairs(tooltipsInOrder) do
-      k:SetHeight(maxTooltipHeight)
-    end
+    ShowMultiColumnFrame(tooltip, collector.lines, numColumns)
 
   end
 
