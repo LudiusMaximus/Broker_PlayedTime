@@ -740,7 +740,7 @@ local function ShowMultiColumnFrame(tooltip, collectedLines, numColumns)
     local h = 0
     for _, pair in ipairs(columns[col].pairs) do
       h = h + tooltipLineHeight + LINE_SPACING
-      if pair.kind == "realm" then h = h + REALM_EXTRA_SPACING end
+      if pair.kind == "realm" or pair.kind == "title" then h = h + REALM_EXTRA_SPACING end
     end
     if h > maxColHeight then maxColHeight = h end
   end
@@ -754,7 +754,7 @@ local function ShowMultiColumnFrame(tooltip, collectedLines, numColumns)
       pair.left:SetPoint("TOPLEFT", multiColumnFrame, "TOPLEFT", x, yOffset)
       pair.right:SetPoint("TOPRIGHT", multiColumnFrame, "TOPLEFT", x + colWidth, yOffset)
       yOffset = yOffset - (tooltipLineHeight + LINE_SPACING)
-      if pair.kind == "realm" then yOffset = yOffset - REALM_EXTRA_SPACING end
+      if pair.kind == "realm" or pair.kind == "title" then yOffset = yOffset - REALM_EXTRA_SPACING end
     end
     x = x + colWidth + COLUMN_GAP
   end
@@ -1303,7 +1303,7 @@ local function OnTooltipShow(tooltip)
   if tooltipLineHeight then
     estimatedHeight = tooltipInitialHeight + lineCounter*tooltipLineHeight
   elseif not fallBackWarningGiven then
-    print(ADDON, "could not determine your tooltip line height. Falling back to single tooltip view.")
+    print(ADDON, "could not determine your tooltip line height. Falling back to single column tooltip.")
     fallBackWarningGiven = true
   end
 
