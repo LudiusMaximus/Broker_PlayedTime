@@ -1257,13 +1257,14 @@ local function OnTooltipShow(tooltip)
   end
 
   -- Estimate how many tooltips we need.
-  local tooltipInitialHeight = 0
+  -- NOTE: Do NOT call tooltip:Show() / tooltip:GetHeight() here. When this hook fires
+  -- inside TimeManagerClockButton_UpdateTooltip (a C-level secure call), GetHeight()
+  -- returns a tainted "secret" number that cannot be used in arithmetic.
+  -- Instead, compute the initial height from our own measurements.
   local initialNumLines = tooltip:NumLines()
-  if initialNumLines > 0 then
-    tooltip:Show()
-    tooltipInitialHeight = tooltip:GetHeight()
-  else
-    tooltipInitialHeight = tooltipTopBottomPadding
+  local tooltipInitialHeight = tooltipTopBottomPadding or 0
+  if tooltipLineHeight and initialNumLines > 0 then
+    tooltipInitialHeight = tooltipTopBottomPadding + (initialNumLines * tooltipLineHeight)
   end
   -- print("tooltipInitialHeight", tooltipInitialHeight)
   -- print("initialNumLines", initialNumLines)
