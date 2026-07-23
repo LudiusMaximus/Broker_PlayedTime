@@ -21,8 +21,7 @@ local currentFaction = UnitFactionGroup("player")
 local currentPlayer = UnitName("player")
 local currentRealm = GetRealmName()
 
--- With 14 the lines get bigger than blank lines.
--- TODO: Make it math.floor(tooltipLineHeight)
+-- Icon size tracks measured tooltip line height when available.
 local textIconSize = 13
 
 local factionIcons = {
@@ -428,12 +427,91 @@ end
 
 -- Dedicated tooltip for measuring line height.
 local measureTooltip = nil
+local measureFontString = nil
 local tooltipLineHeight = nil
 -- https://warcraft.wiki.gg/wiki/API_GameTooltip_GetPadding only returned 0,0,0,0 for me, so I am getting the "padding" manually.
 -- (The "padding" is the actual padding plus the difference between a normal tooltip line and the slightly greater title line.)
 local tooltipTopBottomPadding = nil
-function GetTooltipLineHeight()
+local tooltipLineHeightIsEstimate = false
 
+local DEFAULT_TOOLTIP_LINE_HEIGHT = 13
+local DEFAULT_TOOLTIP_PADDING = 14
+local TOOLTIP_MEASURE_MAX_RETRIES = 8
+local tooltipMeasureRetries = 0
+local tooltipMeasureRetryPending = false
+
+local function HeightsAreConsistent(h2, lineHeight, h3)
+  if lineHeight <= 0 or h2 <= 0 or h3 <= 0 then return false end
+  return math.abs((h2 + lineHeight) - h3) < 1
+end
+
+local function GetFontBasedTooltipMetrics()
+  if not measureFontString then
+    measureFontString = UIParent:CreateFontString(nil, "OVERLAY")
+  end
+
+  measureFontString:SetFontObject(GameTooltipText)
+  measureFontString:SetText("Ay")
+  local lineHeight = measureFontString:GetStringHeight()
+  if not lineHeight or lineHeight <= 0 then
+    local _, fontHeight = GameTooltipText:GetFont()
+    lineHeight = fontHeight and (fontHeight + 2) or nil
+  end
+
+  measureFontString:SetFontObject(GameTooltipHeaderText)
+  measureFontString:SetText("Title")
+  local titleHeight = measureFontString:GetStringHeight()
+  if not titleHeight or titleHeight <= 0 then
+    titleHeight = lineHeight
+  end
+
+  if lineHeight and lineHeight > 0 then
+    return lineHeight, titleHeight
+  end
+end
+
+local function CacheTooltipMetrics()
+  if db and tooltipLineHeight and not tooltipLineHeightIsEstimate then
+    db.cachedTooltipLineHeight = tooltipLineHeight
+    db.cachedTooltipTopBottomPadding = tooltipTopBottomPadding
+  end
+end
+
+local function ApplyTooltipLineHeightFallback()
+  local lineHeight, padding = GetFontBasedTooltipMetrics()
+  if lineHeight then
+    tooltipLineHeight = lineHeight
+    tooltipTopBottomPadding = padding
+    tooltipLineHeightIsEstimate = true
+    return "font"
+  end
+
+  if db and db.cachedTooltipLineHeight and db.cachedTooltipLineHeight > 0 then
+    tooltipLineHeight = db.cachedTooltipLineHeight
+    tooltipTopBottomPadding = db.cachedTooltipTopBottomPadding or DEFAULT_TOOLTIP_PADDING
+    tooltipLineHeightIsEstimate = true
+    return "cached"
+  end
+
+  tooltipLineHeight = DEFAULT_TOOLTIP_LINE_HEIGHT
+  tooltipTopBottomPadding = DEFAULT_TOOLTIP_PADDING
+  tooltipLineHeightIsEstimate = true
+  return "default"
+end
+
+local function ScheduleTooltipMeasureRetry()
+  if tooltipMeasureRetryPending then return end
+  if tooltipMeasureRetries >= TOOLTIP_MEASURE_MAX_RETRIES then return end
+
+  tooltipMeasureRetries = tooltipMeasureRetries + 1
+  tooltipMeasureRetryPending = true
+  C_Timer.After(0.5 + tooltipMeasureRetries * 0.25, function()
+    tooltipMeasureRetryPending = false
+    GetTooltipLineHeight()
+  end)
+end
+
+function GetTooltipLineHeight(silentRetry)
   if not measureTooltip then
     measureTooltip = CreateFrame("GameTooltip", ADDON .. "_MeasureTooltip", UIParent, "SharedTooltipTemplate")
   else
@@ -456,14 +534,31 @@ function GetTooltipLineHeight()
   local tooltipHeight3 = measureTooltip:GetHeight()
   measureTooltip:Hide()
 
-  if math.floor((tooltipHeight2 + lineHeight) * 1000) - math.floor(tooltipHeight3 * 1000) == 0 then
+  if HeightsAreConsistent(tooltipHeight2, lineHeight, tooltipHeight3) then
     tooltipLineHeight = lineHeight
     tooltipTopBottomPadding = tooltipHeight1 - lineHeight
-  else
-    tooltipLineHeight = nil
-    tooltipTopBottomPadding = nil
+    tooltipLineHeightIsEstimate = false
+    CacheTooltipMetrics()
+    textIconSize = math.floor(lineHeight)
+    return true
   end
 
+  -- Tooltip layout is often not ready yet during login or after UI reloads.
+  -- Keep multi-column working with fallbacks and retry precise measurement later.
+  if lineHeight >= 8 and lineHeight < 40 and tooltipHeight1 >= 8 and tooltipHeight2 > tooltipHeight1 then
+    tooltipLineHeight = lineHeight
+    tooltipTopBottomPadding = tooltipHeight1 - lineHeight
+    tooltipLineHeightIsEstimate = true
+    textIconSize = math.floor(lineHeight)
+  elseif not tooltipLineHeight then
+    ApplyTooltipLineHeightFallback()
+    textIconSize = math.floor(tooltipLineHeight)
+  end
+
+  if not silentRetry then
+    ScheduleTooltipMeasureRetry()
+  end
+  return false
 end
 
 
@@ -1248,12 +1343,10 @@ end
 
 
 
-local fallBackWarningGiven = false
-
 local function OnTooltipShow(tooltip)
 
-  if not tooltipLineHeight then
-    GetTooltipLineHeight()
+  if not tooltipLineHeight or tooltipLineHeightIsEstimate then
+    GetTooltipLineHeight(true)
   end
 
   -- Estimate how many tooltips we need.
@@ -1298,15 +1391,7 @@ local function OnTooltipShow(tooltip)
 
 
 
-  -- If we were not able to determine tooltipLineHeight, there is something messed up with this user's tooltip.
-  -- No better solution yet than to not use multiple tooltips.
-  local estimatedHeight = 0
-  if tooltipLineHeight then
-    estimatedHeight = tooltipInitialHeight + lineCounter*tooltipLineHeight
-  elseif not fallBackWarningGiven then
-    print(ADDON, "could not determine your tooltip line height. Falling back to single column tooltip.")
-    fallBackWarningGiven = true
-  end
+  local estimatedHeight = tooltipInitialHeight + lineCounter * tooltipLineHeight
 
   -- print("estimatedHeight", estimatedHeight)
 
