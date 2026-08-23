@@ -1,4 +1,4 @@
-﻿## Interface: 120007
+﻿## Interface: 120100
 ## Version: @project-version@
 ## Title: Broker: Played Time
 ## IconTexture: interface/icons/spell_nature_timestop.blp
