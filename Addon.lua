@@ -432,7 +432,35 @@ local tooltipLineHeight = nil
 -- https://warcraft.wiki.gg/wiki/API_GameTooltip_GetPadding only returned 0,0,0,0 for me, so I am getting the "padding" manually.
 -- (The "padding" is the actual padding plus the difference between a normal tooltip line and the slightly greater title line.)
 local tooltipTopBottomPadding = nil
-function GetTooltipLineHeight()
+
+-- Font size the current measurement was taken with, so we notice when another addon
+-- swaps the tooltip font after we have already measured.
+local measuredWithFontSize = nil
+
+-- Flip this to print what the measurement came up with. Only needed to diagnose user reports.
+local debugLineHeight = false
+
+local function GetTooltipFontSize()
+  local _, fontSize = GameTooltipText:GetFont()
+  return fontSize
+end
+
+-- Last resort if measuring a real tooltip does not give a plausible result.
+-- A rough estimate still yields a usable multi-column layout, whereas giving up
+-- forces a single column that runs off the screen.
+local function EstimateTooltipMetricsFromFont()
+  local fontSize = GetTooltipFontSize() or 12
+  local _, headerFontSize = GameTooltipHeaderText:GetFont()
+  headerFontSize = headerFontSize or 14
+  -- A tooltip line is the font size plus roughly two pixels of line spacing.
+  -- Blizzard's tooltips inset their text by roughly ten pixels at the top and at the bottom.
+  return fontSize + 2, 20 + headerFontSize - fontSize
+end
+
+-- We take the slope over a wide span of lines instead of comparing two adjacent heights.
+-- That divides the rounding error of every individual GetHeight() by the number of lines
+-- and it stays correct even if something clamps the minimum height of a short tooltip.
+local function GetTooltipLineHeight()
 
   if not measureTooltip then
     measureTooltip = CreateFrame("GameTooltip", ADDON .. "_MeasureTooltip", UIParent, "SharedTooltipTemplate")
@@ -442,28 +470,50 @@ function GetTooltipLineHeight()
 
   measureTooltip:SetOwner(UIParent, "ANCHOR_TOPLEFT")
 
+  -- The first line uses the slightly greater title font, all others are normal lines.
   measureTooltip:AddLine("Title")
+  for _ = 1, 4 do measureTooltip:AddLine("Line") end
   measureTooltip:Show()
-  local tooltipHeight1 = measureTooltip:GetHeight()
-  measureTooltip:AddLine("Line 1")
-  measureTooltip:Show()
-  local tooltipHeight2 = measureTooltip:GetHeight()
-  local lineHeight = tooltipHeight2 - tooltipHeight1
+  -- tooltipHeightA == padding + titleLine + 4 * lineHeight
+  local tooltipHeightA = measureTooltip:GetHeight()
 
-  -- Check to be on the safe side.
-  measureTooltip:AddLine("Line 2")
+  for _ = 1, 20 do measureTooltip:AddLine("Line") end
   measureTooltip:Show()
-  local tooltipHeight3 = measureTooltip:GetHeight()
+  -- tooltipHeightB == padding + titleLine + 24 * lineHeight
+  local tooltipHeightB = measureTooltip:GetHeight()
+
   measureTooltip:Hide()
 
-  if math.floor((tooltipHeight2 + lineHeight) * 1000) - math.floor(tooltipHeight3 * 1000) == 0 then
+  local lineHeight = (tooltipHeightB - tooltipHeightA) / 20
+
+  -- Plausibility check instead of an exact comparison. GetHeight() comes back through
+  -- float32, so any height that is not exactly representable is off by a few millionths.
+  -- Anything stricter than this rejects perfectly good measurements for everybody whose
+  -- tooltip font is not a whole number of pixels high.
+  if lineHeight > 5 and lineHeight < 60 then
     tooltipLineHeight = lineHeight
-    tooltipTopBottomPadding = tooltipHeight1 - lineHeight
+    tooltipTopBottomPadding = tooltipHeightA - 5 * lineHeight
   else
-    tooltipLineHeight = nil
-    tooltipTopBottomPadding = nil
+    tooltipLineHeight, tooltipTopBottomPadding = EstimateTooltipMetricsFromFont()
+    if debugLineHeight then
+      print(ADDON, "implausible measurement", tooltipHeightA, tooltipHeightB, lineHeight, "- estimating instead")
+    end
   end
 
+  measuredWithFontSize = GetTooltipFontSize()
+
+  if debugLineHeight then
+    print(ADDON, "line height", tooltipLineHeight, "padding", tooltipTopBottomPadding)
+  end
+
+end
+
+-- Measure on demand instead of once at login: the layout is not necessarily settled at
+-- PLAYER_LOGIN, and other addons may only install their tooltip font after we have loaded.
+local function EnsureTooltipLineHeight()
+  if not tooltipLineHeight or measuredWithFontSize ~= GetTooltipFontSize() then
+    GetTooltipLineHeight()
+  end
 end
 
 
@@ -891,8 +941,6 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 
   self:UpdateTimePlayed()
 
-  GetTooltipLineHeight()
-
 end
 
 local requesting
@@ -1224,7 +1272,7 @@ local function AddPlayerLines(tooltip, realm, names, firstIndex, lastIndex)
               factionIcons[db.factionIcons][mapPlayerToFaction[realm][name]],
               db.classIcons and classIcons[data.class] or "",
               CLASS_COLORS[data.class] or CLASS_COLORS["UNKNOWN"],
-              (db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. (tooltipLineHeight and math.floor(tooltipLineHeight) or "13") .. "|t" or "",
+              (db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. math.floor(tooltipLineHeight) .. "|t" or "",
               name,
               db.levels and (" (" .. data.level .. (db.showPlayedTimeLevel and (": " .. FormatTime(charTimeLevel, not db.alwaysShowMinutes)) or "") .. ")") or ""
             ),
@@ -1248,13 +1296,9 @@ end
 
 
 
-local fallBackWarningGiven = false
-
 local function OnTooltipShow(tooltip)
 
-  if not tooltipLineHeight then
-    GetTooltipLineHeight()
-  end
+  EnsureTooltipLineHeight()
 
   -- Estimate how many tooltips we need.
   -- NOTE: Do NOT call tooltip:Show() / tooltip:GetHeight() here. When this hook fires
@@ -1262,8 +1306,8 @@ local function OnTooltipShow(tooltip)
   -- returns a tainted "secret" number that cannot be used in arithmetic.
   -- Instead, compute the initial height from our own measurements.
   local initialNumLines = tooltip:NumLines()
-  local tooltipInitialHeight = tooltipTopBottomPadding or 0
-  if tooltipLineHeight and initialNumLines > 0 then
+  local tooltipInitialHeight = tooltipTopBottomPadding
+  if initialNumLines > 0 then
     tooltipInitialHeight = tooltipTopBottomPadding + (initialNumLines * tooltipLineHeight)
   end
   -- print("tooltipInitialHeight", tooltipInitialHeight)
@@ -1298,15 +1342,7 @@ local function OnTooltipShow(tooltip)
 
 
 
-  -- If we were not able to determine tooltipLineHeight, there is something messed up with this user's tooltip.
-  -- No better solution yet than to not use multiple tooltips.
-  local estimatedHeight = 0
-  if tooltipLineHeight then
-    estimatedHeight = tooltipInitialHeight + lineCounter*tooltipLineHeight
-  elseif not fallBackWarningGiven then
-    print(ADDON, "could not determine your tooltip line height. Falling back to single column tooltip.")
-    fallBackWarningGiven = true
-  end
+  local estimatedHeight = tooltipInitialHeight + lineCounter*tooltipLineHeight
 
   -- print("estimatedHeight", estimatedHeight)
 
