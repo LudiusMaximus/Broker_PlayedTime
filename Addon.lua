@@ -21,53 +21,64 @@ local currentFaction = UnitFactionGroup("player")
 local currentPlayer = UnitName("player")
 local currentRealm = GetRealmName()
 
--- With 14 the lines get bigger than blank lines.
--- TODO: Make it math.floor(tooltipLineHeight)
-local textIconSize = 13
+-- An inline icon that is taller than a line of text makes its line taller than a blank
+-- line, and then every height estimate comes out too low. How big an icon still fits
+-- depends on the tooltip font, which other addons are free to replace, so the size is
+-- measured rather than assumed; see MeasureMaxIconSize().
+local textIconSize
 
-local factionIcons = {
-  [false] = {
+local factionIcons = {}
+local classIcons = {}
+
+local function BuildIconStrings(iconSize)
+
+  textIconSize = iconSize
+
+  factionIcons[false] = {
     Alliance = "",
     Horde = "",
     Neutral = ""
-  },
-  [true] = {
+  }
+  factionIcons[true] = {
     Alliance = "|TInterface\\BattlefieldFrame\\Battleground-Alliance:" .. textIconSize .. ":" .. textIconSize .. ":0:0:32:32:4:26:4:27|t ",
     Horde = "|TInterface\\BattlefieldFrame\\Battleground-Horde:" .. textIconSize .. ":" .. textIconSize .. ":0:0:32:32:5:25:5:26|t ",
     Neutral = "",
-  },
-  ["set4"] = {
+  }
+  factionIcons["set4"] = {
     Alliance = "|A:honorsystem-portrait-alliance:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
     Horde = "|A:honorsystem-portrait-horde:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
     Neutral = "|A:honorsystem-portrait-neutral:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
-  },
-}
+  }
 
--- These icons are only available in retail.
-if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
-  factionIcons["set1"] = {
-    Alliance = "|A:AllianceSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-    Horde = "|A:HordeSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-    Neutral = "|A:CrossedFlags:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-  }
-  factionIcons["set2"] = {
-    Alliance = "|A:nameplates-icon-flag-alliance:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-    Horde = "|A:nameplates-icon-flag-horde:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-    Neutral = "|A:nameplates-icon-flag-neutral:" .. textIconSize .. ":" .. textIconSize .. "|a ",
-  }
-  factionIcons["set3"] = {
-    Alliance = "|A:Warfronts-BaseMapIcons-Alliance-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
-    Horde = "|A:Warfronts-BaseMapIcons-Horde-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
-    Neutral = "|A:Warfronts-BaseMapIcons-Empty-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
-  }
+  -- These icons are only available in retail.
+  if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
+    factionIcons["set1"] = {
+      Alliance = "|A:AllianceSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+      Horde = "|A:HordeSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+      Neutral = "|A:CrossedFlags:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+    }
+    factionIcons["set2"] = {
+      Alliance = "|A:nameplates-icon-flag-alliance:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+      Horde = "|A:nameplates-icon-flag-horde:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+      Neutral = "|A:nameplates-icon-flag-neutral:" .. textIconSize .. ":" .. textIconSize .. "|a ",
+    }
+    factionIcons["set3"] = {
+      Alliance = "|A:Warfronts-BaseMapIcons-Alliance-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
+      Horde = "|A:Warfronts-BaseMapIcons-Horde-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
+      Neutral = "|A:Warfronts-BaseMapIcons-Empty-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
+    }
+  end
+
+  wipe(classIcons)
+  for class, t in pairs(CLASS_ICON_TCOORDS) do
+    local offset, left, right, bottom, top = 0.025, unpack(t)
+    classIcons[class] = format("|TInterface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes:" .. textIconSize .. ":" .. textIconSize .. ":0:0:256:256:%s:%s:%s:%s|t ", (left + offset) * 256, (right - offset) * 256, (bottom + offset) * 256, (top - offset) * 256)
+  end
+
 end
 
-
-local classIcons = {}
-for class, t in pairs(CLASS_ICON_TCOORDS) do
-  local offset, left, right, bottom, top = 0.025, unpack(t)
-  classIcons[class] = format("|TInterface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes:" .. textIconSize .. ":" .. textIconSize .. ":0:0:256:256:%s:%s:%s:%s|t ", (left + offset) * 256, (right - offset) * 256, (bottom + offset) * 256, (top - offset) * 256)
-end
+-- 13 fits Blizzard's default font. Only used until the first measurement has happened.
+BuildIconStrings(13)
 
 local CLASS_COLORS = { UNKNOWN = "|cffcccccc" }
 for k, v in pairs(RAID_CLASS_COLORS) do
@@ -426,7 +437,7 @@ local function PerformLevelSquish()
 end
 
 
--- Dedicated tooltip for measuring line height.
+-- Dedicated tooltip for measuring line height and icon size.
 local measureTooltip = nil
 local tooltipLineHeight = nil
 -- https://warcraft.wiki.gg/wiki/API_GameTooltip_GetPadding only returned 0,0,0,0 for me, so I am getting the "padding" manually.
@@ -437,8 +448,12 @@ local tooltipTopBottomPadding = nil
 -- swaps the tooltip font after we have already measured.
 local measuredWithFontSize = nil
 
--- Flip this to print what the measurement came up with. Only needed to diagnose user reports.
+-- Turned on with "/brokerplayedtime debug". Only needed to diagnose user reports.
 local debugLineHeight = false
+
+local function DebugPrint(...)
+  if debugLineHeight then print(ADDON, ...) end
+end
 
 local function GetTooltipFontSize()
   local _, fontSize = GameTooltipText:GetFont()
@@ -457,10 +472,14 @@ local function EstimateTooltipMetricsFromFont()
   return fontSize + 2, 20 + headerFontSize - fontSize
 end
 
--- We take the slope over a wide span of lines instead of comparing two adjacent heights.
--- That divides the rounding error of every individual GetHeight() by the number of lines
--- and it stays correct even if something clamps the minimum height of a short tooltip.
-local function GetTooltipLineHeight()
+-- Number of normal lines in the small measuring tooltip, and how many more lines the
+-- big one gets on top of that.
+local MEASURE_BASE_LINES = 4
+local MEASURE_SPAN = 20
+
+-- Rebuild the measuring tooltip with a title line plus numLines normal lines and return
+-- its height. linePrefix is put in front of every normal line.
+local function MeasureTooltipHeight(numLines, linePrefix)
 
   if not measureTooltip then
     measureTooltip = CreateFrame("GameTooltip", ADDON .. "_MeasureTooltip", UIParent, "SharedTooltipTemplate")
@@ -472,19 +491,59 @@ local function GetTooltipLineHeight()
 
   -- The first line uses the slightly greater title font, all others are normal lines.
   measureTooltip:AddLine("Title")
-  for _ = 1, 4 do measureTooltip:AddLine("Line") end
+  for _ = 1, numLines do
+    measureTooltip:AddLine((linePrefix or "") .. "Line")
+  end
   measureTooltip:Show()
-  -- tooltipHeightA == padding + titleLine + 4 * lineHeight
-  local tooltipHeightA = measureTooltip:GetHeight()
-
-  for _ = 1, 20 do measureTooltip:AddLine("Line") end
-  measureTooltip:Show()
-  -- tooltipHeightB == padding + titleLine + 24 * lineHeight
-  local tooltipHeightB = measureTooltip:GetHeight()
-
+  local height = measureTooltip:GetHeight()
   measureTooltip:Hide()
 
-  local lineHeight = (tooltipHeightB - tooltipHeightA) / 20
+  return height
+end
+
+-- Biggest inline icon that still leaves its line as tall as a plain line of text.
+-- A line can only grow with the icon in it, never shrink, so this is monotonous and we
+-- can binary search it. plainHeight is MeasureTooltipHeight(MEASURE_BASE_LINES) without
+-- a prefix. If not even MIN_ICON_SIZE fits, that is what we return and live with.
+local MIN_ICON_SIZE, MAX_ICON_SIZE = 6, 32
+
+local function MeasureMaxIconSize(plainHeight)
+
+  local low, high = MIN_ICON_SIZE, MAX_ICON_SIZE
+
+  while low < high do
+    local size = ceil((low + high) / 2)
+    local probe = format("|TInterface\\CHATFRAME\\ChatFrameExpandArrow:%d:%d|t ", size, size)
+    -- Tolerance, because GetHeight() comes back through float32.
+    if MeasureTooltipHeight(MEASURE_BASE_LINES, probe) - plainHeight < 0.5 then
+      low = size
+    else
+      high = size - 1
+    end
+  end
+
+  return low
+end
+
+-- How far our estimate for the real tooltip was off last time. See VerifyHeightEstimate().
+local estimateCorrection = 1
+
+-- An addon that swaps the tooltip font back and forth would otherwise have us measuring
+-- again on every single hover.
+local MIN_REMEASURE_INTERVAL = 5
+local lastMeasureTime = 0
+
+-- We take the slope over a wide span of lines instead of comparing two adjacent heights.
+-- That divides the rounding error of every individual GetHeight() by the number of lines
+-- and it stays correct even if something clamps the minimum height of a short tooltip.
+local function GetTooltipLineHeight()
+
+  -- tooltipHeightA == padding + titleLine + MEASURE_BASE_LINES * lineHeight
+  local tooltipHeightA = MeasureTooltipHeight(MEASURE_BASE_LINES)
+  -- tooltipHeightB == the same plus MEASURE_SPAN more lines
+  local tooltipHeightB = MeasureTooltipHeight(MEASURE_BASE_LINES + MEASURE_SPAN)
+
+  local lineHeight = (tooltipHeightB - tooltipHeightA) / MEASURE_SPAN
 
   -- Plausibility check instead of an exact comparison. GetHeight() comes back through
   -- float32, so any height that is not exactly representable is off by a few millionths.
@@ -492,28 +551,102 @@ local function GetTooltipLineHeight()
   -- tooltip font is not a whole number of pixels high.
   if lineHeight > 5 and lineHeight < 60 then
     tooltipLineHeight = lineHeight
-    tooltipTopBottomPadding = tooltipHeightA - 5 * lineHeight
+    tooltipTopBottomPadding = tooltipHeightA - (MEASURE_BASE_LINES + 1) * lineHeight
   else
     tooltipLineHeight, tooltipTopBottomPadding = EstimateTooltipMetricsFromFont()
-    if debugLineHeight then
-      print(ADDON, "implausible measurement", tooltipHeightA, tooltipHeightB, lineHeight, "- estimating instead")
-    end
+    DebugPrint("implausible measurement", tooltipHeightA, tooltipHeightB, lineHeight, "- estimating instead")
   end
 
   measuredWithFontSize = GetTooltipFontSize()
+  lastMeasureTime = GetTime()
 
-  if debugLineHeight then
-    print(ADDON, "line height", tooltipLineHeight, "padding", tooltipTopBottomPadding)
-  end
+  -- Whatever we learned about the real tooltip was learned for the old metrics.
+  estimateCorrection = 1
+
+  BuildIconStrings(MeasureMaxIconSize(tooltipHeightA))
+
+  DebugPrint("line height", tooltipLineHeight, "padding", tooltipTopBottomPadding, "icon size", textIconSize)
 
 end
 
 -- Measure on demand instead of once at login: the layout is not necessarily settled at
 -- PLAYER_LOGIN, and other addons may only install their tooltip font after we have loaded.
 local function EnsureTooltipLineHeight()
-  if not tooltipLineHeight or measuredWithFontSize ~= GetTooltipFontSize() then
+  if not tooltipLineHeight then
+    GetTooltipLineHeight()
+  elseif measuredWithFontSize ~= GetTooltipFontSize()
+     and GetTime() - lastMeasureTime > MIN_REMEASURE_INTERVAL then
     GetTooltipLineHeight()
   end
+end
+
+-- We measure a tooltip of our own, but we draw into whichever tooltip the display addon
+-- hands us. A skin that only styles the tooltips it knows by name makes the two disagree,
+-- and if the real one has taller lines than ours, we underestimate and the single column
+-- runs off the screen. So one frame after a single column tooltip, look at what its height
+-- really turned out to be and carry the correction into the next estimate.
+local function VerifyHeightEstimate(tooltip, shownNumLines)
+
+  C_Timer.After(0, function()
+
+    if not tooltip:IsShown() then return DebugPrint("no correction: tooltip already gone") end
+
+    local numLines = tooltip:NumLines()
+    local realHeight = tooltip:GetHeight()
+
+    -- GetHeight() is a secret value while the tooltip belongs to a secure call. That
+    -- should not be the case a frame later, but doing arithmetic on one would throw.
+    if issecretvalue and (issecretvalue(numLines) or issecretvalue(realHeight)) then
+      return DebugPrint("no correction: tooltip height is a secret value")
+    end
+
+    -- Another addon may have added lines after us. Then the height says nothing about
+    -- our own error, so there is nothing to be learned from it.
+    if numLines ~= shownNumLines then
+      return DebugPrint(format("no correction: tooltip has %d lines instead of %d", numLines, shownNumLines))
+    end
+    if not realHeight or realHeight <= 0 then
+      return DebugPrint("no correction: tooltip has no height")
+    end
+
+    local predictedHeight = tooltipTopBottomPadding + shownNumLines * tooltipLineHeight
+    if predictedHeight <= 0 then return DebugPrint("no correction: nothing predicted") end
+
+    local correction = realHeight / predictedHeight
+
+    -- Only believe plausible corrections. Anything beyond this is not a line height
+    -- mismatch but something else going on that we should not bake in.
+    if correction > 0.5 and correction < 2 then
+      estimateCorrection = correction
+      DebugPrint(format("%d lines predicted %.1f, really %.1f, correction %.4f", numLines, predictedHeight, realHeight, correction))
+    else
+      DebugPrint(format("no correction: %d lines predicted %.1f but really %.1f", numLines, predictedHeight, realHeight))
+    end
+
+  end)
+end
+
+------------------------------------------------------------------------
+-- Slash command. Only there to diagnose tooltip layout problems.
+
+SLASH_BROKERPLAYEDTIME1 = "/brokerplayedtime"
+SLASH_BROKERPLAYEDTIME2 = "/bpt"
+SlashCmdList["BROKERPLAYEDTIME"] = function(msg)
+
+  msg = string.lower(msg or "")
+  msg = string.match(msg, "^%s*(.-)%s*$")
+
+  if msg == "debug" or msg == "debug on" then
+    debugLineHeight = true
+    print(ADDON, "debug output on. Now open the Played Time tooltip to see how it is laid out.")
+    GetTooltipLineHeight()
+  elseif msg == "debug off" then
+    debugLineHeight = false
+    print(ADDON, "debug output off.")
+  else
+    print(ADDON, "usage: /brokerplayedtime debug [on|off]")
+  end
+
 end
 
 
@@ -1272,7 +1405,7 @@ local function AddPlayerLines(tooltip, realm, names, firstIndex, lastIndex)
               factionIcons[db.factionIcons][mapPlayerToFaction[realm][name]],
               db.classIcons and classIcons[data.class] or "",
               CLASS_COLORS[data.class] or CLASS_COLORS["UNKNOWN"],
-              (db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. math.floor(tooltipLineHeight) .. "|t" or "",
+              (db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. textIconSize .. "|t" or "",
               name,
               db.levels and (" (" .. data.level .. (db.showPlayedTimeLevel and (": " .. FormatTime(charTimeLevel, not db.alwaysShowMinutes)) or "") .. ")") or ""
             ),
@@ -1300,23 +1433,23 @@ local function OnTooltipShow(tooltip)
 
   EnsureTooltipLineHeight()
 
-  -- Estimate how many tooltips we need.
+  -- Estimate how many columns we need.
   -- NOTE: Do NOT call tooltip:Show() / tooltip:GetHeight() here. When this hook fires
   -- inside TimeManagerClockButton_UpdateTooltip (a C-level secure call), GetHeight()
   -- returns a tainted "secret" number that cannot be used in arithmetic.
   -- Instead, compute the initial height from our own measurements.
+  -- (VerifyHeightEstimate() does read the real height, but a frame later and outside
+  -- of the secure call, where it is an ordinary number again.)
   local initialNumLines = tooltip:NumLines()
   local tooltipInitialHeight = tooltipTopBottomPadding
   if initialNumLines > 0 then
     tooltipInitialHeight = tooltipTopBottomPadding + (initialNumLines * tooltipLineHeight)
   end
-  -- print("tooltipInitialHeight", tooltipInitialHeight)
-  -- print("initialNumLines", initialNumLines)
 
 
   local lineCounter = 0
   lineCounter = lineCounter + 1             -- tooltip:AddLine(L["Played Time"])
-  lineCounter = lineCounter + 1             -- tooltip:AddLine(L["Right click for settings"])
+  lineCounter = lineCounter + 1             -- tooltip:AddLine(L["Right click for options"])
 
   for _, realm in ipairs(sortedRealms) do
     lineCounter = lineCounter + 1          -- tooltip:AddLine(" ")
@@ -1342,16 +1475,20 @@ local function OnTooltipShow(tooltip)
 
 
 
-  local estimatedHeight = tooltipInitialHeight + lineCounter*tooltipLineHeight
-
-  -- print("estimatedHeight", estimatedHeight)
-
+  local estimatedHeight = (tooltipInitialHeight + lineCounter*tooltipLineHeight) * estimateCorrection
   local allowedHeight = 0.7 * UIParent:GetHeight()
-  -- print("allowedHeight", allowedHeight)
+
+  local numColumns = 1
+  if estimatedHeight > allowedHeight then
+    numColumns = ceil(estimatedHeight / allowedHeight)
+  end
+
+  DebugPrint(format("%d lines (%d already there) estimated at %.1f, allowed %.1f, using %d column(s)",
+                    initialNumLines + lineCounter, initialNumLines, estimatedHeight, allowedHeight, numColumns))
 
 
   -- One tooltip is enough.
-  if estimatedHeight <= allowedHeight then
+  if numColumns == 1 then
     local totalTime = 0
     tooltip:AddLine(L["Played Time"])
     tooltip:AddLine("|cffa8a8a8(" .. L["Right click for options"] .. ")|r")
@@ -1374,14 +1511,15 @@ local function OnTooltipShow(tooltip)
     tooltip:AddDoubleLine(L["Total"], FormatTime(totalTime, not db.alwaysShowMinutes))
 
     tooltip:Show()
-    -- print("real height", tooltip:GetHeight(), tooltip:NumLines())
+
+    -- AddPlayerLines() skips characters without played time, so the number of lines we
+    -- counted for the estimate is an upper bound. Learn from what is actually there.
+    VerifyHeightEstimate(tooltip, tooltip:NumLines())
 
 
   -- #########################################################################
   -- We need several columns. Use custom multi-column frame.
   else
-
-    local numColumns = ceil(estimatedHeight / allowedHeight)
 
     -- Collect all lines into a virtual tooltip.
     local collector = CreateLineCollector()
