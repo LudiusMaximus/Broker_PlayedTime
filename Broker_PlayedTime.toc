@@ -10,9 +10,9 @@
 ## Notes-esMX: Plugin de Intermediario de Datos para registrar el tiempo de juego de todos sus personajes.
 ## Notes-frFR: Plugin de Courtier de Données pour suivre le temps de jeu de tous vos personnages.
 ## Notes-itIT: Plugin Data Broker per tenere traccia del tempo di gioco di tutti i vostri personaggi.
+## Notes-koKR: 용사님의 모든 캐릭터 플레이 시간을 추적하는 데이터 브로커 플러그인입니다.
 ## Notes-ptBR: Plugin de Corretor de Dados para rastrear o tempo de jogo de todos os vossos personagens.
 ## Notes-ruRU: Плагин «Посредник данных» для отслеживания времени в игре всех Ваших персонажей.
-## Notes-koKR: 용사님의 모든 캐릭터 플레이 시간을 추적하는 데이터 브로커 플러그인입니다.
 ## Notes-zhCN: 用于追踪您所有角色游戏时间的数据管理插件。
 ## Notes-zhTW: 用於追蹤您所有角色遊玩時間的資料管理插件。
 
