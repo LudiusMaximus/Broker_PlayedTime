@@ -21,6 +21,26 @@ local currentFaction = UnitFactionGroup("player")
 local currentPlayer = UnitName("player")
 local currentRealm = GetRealmName()
 
+-- WoW Forever has no realms. All characters of an account share one world and
+-- GetRealmName() only returns the leftover name of whatever shard a character was
+-- migrated from. What actually keeps characters apart there is the game ruleset,
+-- so we use that as the realm key, just like AceDB-3.0 does.
+local interfaceVersion = select(4, GetBuildInfo())
+if interfaceVersion > 16000 and interfaceVersion < 20000 then
+  if C_GameRules.IsGameRuleActive(Enum.GameRule.HardcoreRuleset) then
+    currentRealm = "Hardcore"
+  elseif C_GameRules.IsGameRuleActive(Enum.GameRule.RPRuleset) then
+    currentRealm = "RP"
+  elseif C_GameRules.IsGameRuleActive(Enum.GameRule.PvPRuleset) then
+    currentRealm = "PvP"
+  else
+    currentRealm = "PvE"
+  end
+end
+
+-- Must never be nil or empty, because it is used as a table key.
+if not currentRealm or currentRealm == "" then currentRealm = UNKNOWN end
+
 -- An inline icon that is taller than a line of text makes its line taller than a blank
 -- line, and then every height estimate comes out too low. How big an icon still fits
 -- depends on the tooltip font, which other addons are free to replace, so the size is

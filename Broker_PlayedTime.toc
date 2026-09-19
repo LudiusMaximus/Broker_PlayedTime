@@ -1,13 +1,32 @@
-﻿## Interface: 120100
+﻿## Interface: 120100, 16001, 50504, 20506, 11509
 ## Version: @project-version@
 ## Title: Broker: Played Time
 ## IconTexture: interface/icons/spell_nature_timestop.blp
 ## Author: Phanx, LudiusMaximus
+
 ## Notes: DataBroker plugin to track played time across all your characters.
-## Notes-deDE: DataBroker-Plugin, um die gesamt gespielte Zeit deiner Charaktere zu verfolgen.
-## Notes-esES: Plugin DataBroker para seguir el tiempo jugado en todos los personajes.
-## Notes-esMX: Plugin DataBroker para seguir el tiempo jugó en todos los personajes.
-## Notes-ptBR: Plugin DataBroker para seguir o tempo jogado em todos os personagens.
+## Notes-deDE: Datenbroker-Plugin, um die gesamt gespielte Zeit Eurer Charaktere zu verfolgen.
+## Notes-esES: Plugin de Intermediario de Datos para registrar el tiempo de juego de todos vuestros personajes.
+## Notes-esMX: Plugin de Intermediario de Datos para registrar el tiempo de juego de todos sus personajes.
+## Notes-frFR: Plugin de Courtier de Données pour suivre le temps de jeu de tous vos personnages.
+## Notes-itIT: Plugin Data Broker per tenere traccia del tempo di gioco di tutti i vostri personaggi.
+## Notes-ptBR: Plugin de Corretor de Dados para rastrear o tempo de jogo de todos os vossos personagens.
+## Notes-ruRU: Плагин «Посредник данных» для отслеживания времени в игре всех Ваших персонажей.
+## Notes-koKR: 용사님의 모든 캐릭터 플레이 시간을 추적하는 데이터 브로커 플러그인입니다.
+## Notes-zhCN: 用于追踪您所有角色游戏时间的数据管理插件。
+## Notes-zhTW: 用於追蹤您所有角色遊玩時間的資料管理插件。
+
+## Category: Data Broker
+## Category-deDE: Datenbroker
+## Category-esES: Intermediario de Datos
+## Category-esMX: Intermediario de Datos
+## Category-frFR: Courtier de Données
+## Category-itIT: Data Broker
+## Category-koKR: 데이터 브로커
+## Category-ptBR: Corretor de Dados
+## Category-ruRU: Посредник данных
+## Category-zhCN: 数据管理
+## Category-zhTW: 資料管理
 
 ## SavedVariables: BrokerPlayedTimeDB
 
