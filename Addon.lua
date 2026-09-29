@@ -17,29 +17,55 @@ local db, myDB
 local timePlayed, timePlayedLevel, timeUpdated = 0, 0, 0
 local sortedFactions, sortedPlayers, sortedPlayersNoFactions, sortedRealms = { "Horde", "Alliance", "Neutral" }, {}, {}, {}
 
-local currentFaction = UnitFactionGroup("player")
-local currentPlayer = UnitName("player")
-local currentRealm = GetRealmName()
+-- Only filled in at PLAYER_LOGIN, see InitCurrentCharacter().
+local currentFaction, currentPlayer, currentRealm
 
--- WoW Forever has no realms. All characters of an account share one world and
--- GetRealmName() only returns the leftover name of whatever shard a character was
--- migrated from. What actually keeps characters apart there is the game ruleset,
--- so we use that as the realm key, just like AceDB-3.0 does.
+-- WoW Forever has no realms. See InitCurrentCharacter().
 local interfaceVersion = select(4, GetBuildInfo())
-if interfaceVersion > 16000 and interfaceVersion < 20000 then
-  if C_GameRules.IsGameRuleActive(Enum.GameRule.HardcoreRuleset) then
-    currentRealm = "Hardcore"
-  elseif C_GameRules.IsGameRuleActive(Enum.GameRule.RPRuleset) then
-    currentRealm = "RP"
-  elseif C_GameRules.IsGameRuleActive(Enum.GameRule.PvPRuleset) then
-    currentRealm = "PvP"
-  else
-    currentRealm = "PvE"
-  end
+local isForever = interfaceVersion > 16000 and interfaceVersion < 20000
+
+-- The realm keys we store for the Forever rulesets are the same in every locale, so the
+-- saved variables do not depend on the client language. This is what we show instead,
+-- using the names Blizzard gives the rulesets.
+local rulesetNames = {
+  PvE = L["Normal"],
+  PvP = L["PvP"],
+  RP = L["Roleplaying"],
+  Hardcore = L["Hardcore"],
+}
+
+local function GetRealmDisplayName(realm)
+  return isForever and rulesetNames[realm] or realm
 end
 
--- Must never be nil or empty, because it is used as a table key.
-if not currentRealm or currentRealm == "" then currentRealm = UNKNOWN end
+-- Not before PLAYER_LOGIN, because the character is not reliably known before that.
+-- WoW Forever for example returns "Unknown" for UnitName("player") at load time.
+local function InitCurrentCharacter()
+
+  currentFaction = UnitFactionGroup("player")
+  currentPlayer = UnitName("player")
+  currentRealm = GetRealmName()
+
+  -- WoW Forever has no realms. All characters of an account share one world and
+  -- GetRealmName() only returns the leftover name of whatever shard a character was
+  -- migrated from. What actually keeps characters apart there is the game ruleset,
+  -- so we use that as the realm key, just like AceDB-3.0 does.
+  if isForever then
+    if C_GameRules.IsGameRuleActive(Enum.GameRule.HardcoreRuleset) then
+      currentRealm = "Hardcore"
+    elseif C_GameRules.IsGameRuleActive(Enum.GameRule.RPRuleset) then
+      currentRealm = "RP"
+    elseif C_GameRules.IsGameRuleActive(Enum.GameRule.PvPRuleset) then
+      currentRealm = "PvP"
+    else
+      currentRealm = "PvE"
+    end
+  end
+
+  -- Must never be nil or empty, because it is used as a table key.
+  if not currentRealm or currentRealm == "" then currentRealm = UNKNOWN end
+
+end
 
 -- An inline icon that is taller than a line of text makes its line taller than a blank
 -- line, and then every height estimate comes out too low. How big an icon still fits
@@ -181,7 +207,7 @@ local BuildSortedLists
 do
   local function SortPlayers(a, b)
 
-    if db.currentPlayerOnTop then
+    if db.currentPlayerOnTop and currentlySortingRealm == currentRealm then
       if a == currentPlayer then
         return true
       elseif b == currentPlayer then
@@ -440,7 +466,7 @@ local squishTable = {
 local function PerformLevelSquish()
 
   -- Only once for game clients after Shadowlands.
-  if db.performedLevelSquish or select(4, GetBuildInfo()) < 90000 then return end
+  if db.performedLevelSquish or interfaceVersion < 90000 then return end
 
   for realm in pairs(db) do
     if type(db[realm]) == "table" then
@@ -522,7 +548,7 @@ local function MeasureTooltipHeight(numLines, linePrefix)
 end
 
 -- Biggest inline icon that still leaves its line as tall as a plain line of text.
--- A line can only grow with the icon in it, never shrink, so this is monotonous and we
+-- A line can only grow with the icon in it, never shrink, so this is monotonic and we
 -- can binary search it. plainHeight is MeasureTooltipHeight(MEASURE_BASE_LINES) without
 -- a prefix. If not even MIN_ICON_SIZE fits, that is what we return and live with.
 local MIN_ICON_SIZE, MAX_ICON_SIZE = 6, 32
@@ -756,16 +782,17 @@ end
 -- Line collector: a "virtual tooltip" that captures AddLine/AddDoubleLine calls.
 -- The optional `kind` parameter tags special lines: "title", "realm", "total".
 -- `currentRealm` is a mutable field the caller sets (and later clears) around each
--- group of character lines. Every DoubleLine added while it is set inherits the realm
--- name as a `realm` field on its entry. ShowMultiColumnFrame reads those fields to
--- identify contiguous realm blocks and uses them for the column-balancing algorithm
--- (avoiding orphan groups at column boundaries).
+-- group of character lines, before adding the realm title. The realm title and every
+-- DoubleLine added while it is set inherit the realm key as a `realm` field on their
+-- entry. ShowMultiColumnFrame reads those fields to identify contiguous realm blocks
+-- and uses them for the column-balancing algorithm (avoiding orphan groups at column
+-- boundaries).
 local function CreateLineCollector()
   return {
     lines = {},
     currentRealm = nil,
     AddLine = function(self, text, r, g, b, kind)
-      tinsert(self.lines, { leftText = text, leftR = r, leftG = g, leftB = b, kind = kind })
+      tinsert(self.lines, { leftText = text, leftR = r, leftG = g, leftB = b, kind = kind, realm = (kind == "realm") and self.currentRealm or nil })
     end,
     AddDoubleLine = function(self, lText, rText, lr, lg, lb, rr, rg, rb, kind)
       tinsert(self.lines, { leftText = lText, rightText = rText, leftR = lr, leftG = lg, leftB = lb, rightR = rr, rightG = rg, rightB = rb, kind = kind, realm = (not kind) and self.currentRealm or nil })
@@ -799,7 +826,7 @@ local function ShowMultiColumnFrame(tooltip, collectedLines, numColumns)
       if line.kind == "realm" then
         -- Start a new block with the realm title line.
         -- count only tracks character lines (not the title itself).
-        currentBlock = { startIdx = i, endIdx = i, count = 0, realm = line.leftText }
+        currentBlock = { startIdx = i, endIdx = i, count = 0, realm = line.realm }
         tinsert(realmBlocks, currentBlock)
         lineToBlock[i] = #realmBlocks
       elseif line.realm then
@@ -1002,10 +1029,19 @@ end
 ------------------------------------------------------------------------
 
 local BrokerPlayedTime = CreateFrame("Frame")
-BrokerPlayedTime:SetScript("OnEvent", function(self, event, ...) return self[event] and self[event](self, ...) or self:SaveTimePlayed() end)
+BrokerPlayedTime:SetScript("OnEvent", function(self, event, ...)
+  if self[event] then
+    self[event](self, ...)
+  else
+    self:SaveTimePlayed()
+  end
+end)
 BrokerPlayedTime:RegisterEvent("PLAYER_LOGIN")
 
 function BrokerPlayedTime:PLAYER_LOGIN()
+
+  InitCurrentCharacter()
+
   local function copyTable(src, dst)
     if type(src) ~= "table" then return {} end
     if type(dst) ~= "table" then dst = {} end
@@ -1059,15 +1095,15 @@ function BrokerPlayedTime:PLAYER_LOGIN()
 
   RemoveDuplicates()
 
+  -- Before we store the current level below, which is already a squished one.
+  PerformLevelSquish()
+
   myDB = db[currentRealm][currentFaction][currentPlayer]
-  
-  -- Needed if you deleted and recreated a character with the same name but different class.  
+
+  -- Needed if you deleted and recreated a character with the same name but different class.
   myDB.class = (select(2, UnitClass("player")))
   -- Needed for deletion/recreation and for level boost (no PLAYER_LEVEL_UP event).
   myDB.level = UnitLevel("player")
-
-
-  PerformLevelSquish()
 
   BuildMapPlayerToFaction()
 
@@ -1098,27 +1134,15 @@ end
 
 local requesting
 
--- Hook the appropriate display function based on WoW version
-if ChatFrameUtil and ChatFrameUtil.DisplayTimePlayed then
-  -- Retail: Hook ChatFrameUtil.DisplayTimePlayed
-  local originalDisplayTimePlayed = ChatFrameUtil.DisplayTimePlayed
-  function ChatFrameUtil.DisplayTimePlayed(chatFrame, totalTime, levelTime)
-    if requesting then
-      requesting = false
-      return  -- Suppress the message display
-    end
-    return originalDisplayTimePlayed(chatFrame, totalTime, levelTime)
+-- Suppress the chat message for the played time we request ourselves.
+-- (Every game version we support has ChatFrameUtil.DisplayTimePlayed now.)
+local originalDisplayTimePlayed = ChatFrameUtil.DisplayTimePlayed
+function ChatFrameUtil.DisplayTimePlayed(chatFrame, totalTime, levelTime)
+  if requesting then
+    requesting = false
+    return
   end
-else
-  -- Classic: Hook ChatFrame_DisplayTimePlayed
-  local o = ChatFrame_DisplayTimePlayed
-  ChatFrame_DisplayTimePlayed = function(...)
-    if requesting then
-      requesting = false
-      return
-    end
-    return o(...)
-  end
+  return originalDisplayTimePlayed(chatFrame, totalTime, levelTime)
 end
 
 function BrokerPlayedTime:UpdateTimePlayed()
@@ -1127,6 +1151,10 @@ function BrokerPlayedTime:UpdateTimePlayed()
 end
 
 function BrokerPlayedTime:SaveTimePlayed()
+  -- Before the first TIME_PLAYED_MSG we do not know the played time yet, and saving
+  -- would store the seconds since 1970 instead.
+  if timeUpdated == 0 then return end
+
   local now = time()
   myDB.timePlayed = timePlayed + now - timeUpdated
   myDB.timePlayedLevel = timePlayedLevel + now - timeUpdated
@@ -1140,6 +1168,8 @@ end
 function BrokerPlayedTime:PLAYER_LEVEL_UP(level)
   myDB.level = level or UnitLevel("player")
   self:SaveTimePlayed()
+  -- The time on this level starts over now, but we only learn that when we ask.
+  self:UpdateTimePlayed()
 end
 
 function BrokerPlayedTime:TIME_PLAYED_MSG(t, l)
@@ -1270,7 +1300,7 @@ local function OpenMenu()
         db.groupByFactions = not db.groupByFactions
       end)
 
-    mainMenu:CreateCheckbox(L["Current realm only"],
+    mainMenu:CreateCheckbox(isForever and L["Current ruleset only"] or L["Current realm only"],
       function() return db.onlyCurrentRealm end,
       function()
         db.onlyCurrentRealm = not db.onlyCurrentRealm
@@ -1306,6 +1336,7 @@ local function OpenMenu()
       function()
         db.alwaysShowMinutes = not db.alwaysShowMinutes
         BrokerPlayedTime:UpdateText()
+        BrokerPlayedTime:SetUpdateInterval(timePlayed < 3600)
       end)
 
     mainMenu:CreateDivider()
@@ -1315,17 +1346,17 @@ local function OpenMenu()
     removeCharSubmenu:SetOnEnter(function(_, desc) desc:ForceOpenSubmenu() end)
 
     for _, realm in ipairs(sortedRealms) do
-      local realmSubmenu = removeCharSubmenu:CreateButton(realm)
+      local realmSubmenu = removeCharSubmenu:CreateButton(GetRealmDisplayName(realm))
       realmSubmenu:SetOnEnter(function(_, desc) desc:ForceOpenSubmenu() end)
 
-      for i, faction in ipairs(sortedFactions) do
+      for _, faction in ipairs(sortedFactions) do
         -- Only show factions that have characters on this realm
         if sortedPlayers[realm] and sortedPlayers[realm][faction] and #sortedPlayers[realm][faction] > 0 then
           -- Faction title
           realmSubmenu:CreateTitle(faction)
 
           -- Character list (indented with radio buttons)
-          for j, name in ipairs(sortedPlayers[realm][faction]) do
+          for _, name in ipairs(sortedPlayers[realm][faction]) do
             local cdata = db[realm][faction][name]
             local disableRemove = (name == currentPlayer and realm == currentRealm)
 
@@ -1336,26 +1367,16 @@ local function OpenMenu()
               function() return false end, -- Never selected
               function()
                 db[realm][faction][name] = nil
-
-                local nf = 0
-                for k in pairs(db[realm][faction]) do
-                  nf = nf + 1
-                end
-                if nf == 0 then
+                if not next(db[realm][faction]) then
                   db[realm][faction] = nil
                 end
-
-                local nr = 0
-                for k in pairs(db[realm]) do
-                  nr = nr + 1
-                end
-                if nr == 0 then
+                if not next(db[realm]) then
                   db[realm] = nil
-                  sortedRealms[realm] = nil
                 end
 
                 BuildMapPlayerToFaction()
                 BuildSortedLists()
+                BrokerPlayedTime:UpdateText()
               end
             ):SetEnabled(not disableRemove)
           end
@@ -1365,7 +1386,7 @@ local function OpenMenu()
 
 
     -- ===== BROKER TEXT OPTIONS =====
-    if not TimeManagerClockButton:IsMouseOver() then
+    if not (TimeManagerClockButton and TimeManagerClockButton:IsMouseOver()) then
       mainMenu:CreateDivider()
 
       local brokerTextSubmenu = mainMenu:CreateButton(L["Broker icon text"])
@@ -1395,12 +1416,10 @@ end
 
 
 
-local function AddPlayerLines(tooltip, realm, names, firstIndex, lastIndex)
-  if not realm or not names or #names == 0 then return 0 end
-  if firstIndex and lastIndex and firstIndex > lastIndex then return 0 end
+local function AddPlayerLines(tooltip, realm, names)
+  if not names then return 0 end
 
   local totalTime = 0
-  local indexCounter = 0
 
   for _, name in ipairs(names) do
     local data = db[realm][mapPlayerToFaction[realm][name]][name]
@@ -1417,31 +1436,23 @@ local function AddPlayerLines(tooltip, realm, names, firstIndex, lastIndex)
       end
 
       if charTime and charTime > 0 then
-        indexCounter = indexCounter + 1
+        tooltip:AddDoubleLine(
+          format("%s%s%s%s%s%s|r",
+            factionIcons[db.factionIcons][mapPlayerToFaction[realm][name]],
+            db.classIcons and classIcons[data.class] or "",
+            CLASS_COLORS[data.class] or CLASS_COLORS["UNKNOWN"],
+            (db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. textIconSize .. "|t" or "",
+            name,
+            db.levels and (" (" .. data.level .. (db.showPlayedTimeLevel and (": " .. FormatTime(charTimeLevel, not db.alwaysShowMinutes)) or "") .. ")") or ""
+          ),
+          FormatTime(charTime, not db.alwaysShowMinutes)
+        )
 
-        if not firstIndex or indexCounter >= firstIndex then
-          tooltip:AddDoubleLine(
-            format("%s%s%s%s%s%s|r",
-              factionIcons[db.factionIcons][mapPlayerToFaction[realm][name]],
-              db.classIcons and classIcons[data.class] or "",
-              CLASS_COLORS[data.class] or CLASS_COLORS["UNKNOWN"],
-              (db.highlightCurrentPlayer and realm == currentRealm and name == currentPlayer) and "|TInterface\\CHATFRAME\\ChatFrameExpandArrow:" .. textIconSize .. "|t" or "",
-              name,
-              db.levels and (" (" .. data.level .. (db.showPlayedTimeLevel and (": " .. FormatTime(charTimeLevel, not db.alwaysShowMinutes)) or "") .. ")") or ""
-            ),
-            FormatTime(charTime, not db.alwaysShowMinutes)
-          )
-
-          totalTime = totalTime + charTime
-        end
-
-        if lastIndex and indexCounter >= lastIndex then return totalTime end
+        totalTime = totalTime + charTime
       end
 
     end
   end
-
-
 
   return totalTime
 end
@@ -1461,10 +1472,7 @@ local function OnTooltipShow(tooltip)
   -- (VerifyHeightEstimate() does read the real height, but a frame later and outside
   -- of the secure call, where it is an ordinary number again.)
   local initialNumLines = tooltip:NumLines()
-  local tooltipInitialHeight = tooltipTopBottomPadding
-  if initialNumLines > 0 then
-    tooltipInitialHeight = tooltipTopBottomPadding + (initialNumLines * tooltipLineHeight)
-  end
+  local tooltipInitialHeight = tooltipTopBottomPadding + initialNumLines * tooltipLineHeight
 
 
   local lineCounter = 0
@@ -1515,7 +1523,7 @@ local function OnTooltipShow(tooltip)
     for _, realm in ipairs(sortedRealms) do
       tooltip:AddLine(" ")
       if #sortedRealms > 1 then
-        tooltip:AddLine(realm)
+        tooltip:AddLine(GetRealmDisplayName(realm))
       end
 
       if db.groupByFactions then
@@ -1568,10 +1576,10 @@ local function OnTooltipShow(tooltip)
     local totalTime = 0
     for _, realm in ipairs(sortedRealms) do
       collector:AddLine(" ")
-      if #sortedRealms > 1 then
-        collector:AddLine(realm, nil, nil, nil, "realm")
-      end
       collector.currentRealm = realm
+      if #sortedRealms > 1 then
+        collector:AddLine(GetRealmDisplayName(realm), nil, nil, nil, "realm")
+      end
 
       if db.groupByFactions then
         for _, faction in ipairs(sortedFactions) do
@@ -1596,7 +1604,9 @@ end
 
 ------------------------------------------------------------------------
 
-BrokerPlayedTime.dataObject = LibStub("LibDataBroker-1.1"):NewDataObject(L["Time Played"], {
+-- Not localized on purpose: other addons (e.g. PlayedTimeMinimapClock) look the data
+-- object up by this name, and display addons store their settings under it.
+BrokerPlayedTime.dataObject = LibStub("LibDataBroker-1.1"):NewDataObject("Time Played", {
   type = "data source",
   icon = [[Interface\Icons\Spell_Nature_TimeStop]],
   text = UNKNOWN,
