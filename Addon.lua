@@ -60,6 +60,14 @@ local function InitCurrentCharacter()
     else
       currentRealm = "PvE"
     end
+
+    -- Without realms, first names are no longer unique on WoW Forever, only first name
+    -- and surname together are. UnitName() returns the surname where other clients
+    -- return the realm. We join them the same way AceDB-3.0 does.
+    local name, surname = UnitNameUnmodified("player")
+    if surname and surname ~= "" then
+      currentPlayer = name .. " " .. surname
+    end
   end
 
   -- Must never be nil or empty, because it is used as a table key.
@@ -177,6 +185,24 @@ local function RemoveDuplicates()
         end
       end
     end
+  end
+end
+
+
+-- Earlier versions stored WoW Forever characters by first name only, so characters
+-- with the same first name overwrote each other's entry. Whichever of them logs in
+-- first takes the entry over. Its class, level and played time are replaced with the
+-- real ones right away anyway.
+local function MigrateForeverFirstNameOnly(savedVariables)
+  if not isForever then return end
+
+  local firstName = UnitNameUnmodified("player")
+  if firstName == currentPlayer then return end
+
+  local names = savedVariables[currentRealm] and savedVariables[currentRealm][currentFaction]
+  if names and names[firstName] and not names[currentPlayer] then
+    names[currentPlayer] = names[firstName]
+    names[firstName] = nil
   end
 end
 
@@ -1091,6 +1117,8 @@ function BrokerPlayedTime:PLAYER_LOGIN()
   }
 
   BrokerPlayedTimeDB = BrokerPlayedTimeDB or {}
+  -- Before copyTable() creates an empty entry for the full name.
+  MigrateForeverFirstNameOnly(BrokerPlayedTimeDB)
   db = copyTable(defaults, BrokerPlayedTimeDB)
 
   RemoveDuplicates()
