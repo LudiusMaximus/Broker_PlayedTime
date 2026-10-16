@@ -20,9 +20,11 @@ local sortedFactions, sortedPlayers, sortedPlayersNoFactions, sortedRealms = { "
 -- Only filled in at PLAYER_LOGIN, see InitCurrentCharacter().
 local currentFaction, currentPlayer, currentRealm
 
--- WoW Forever has no realms. See InitCurrentCharacter().
 local interfaceVersion = select(4, GetBuildInfo())
-local isForever = interfaceVersion > 16000 and interfaceVersion < 20000
+
+-- WoW Forever has no realms. See InitCurrentCharacter().
+-- WOW_PROJECT_CAMELOT is only defined in Forever.
+local isForever = WOW_PROJECT_ID == WOW_PROJECT_CAMELOT
 
 -- The realm keys we store for the Forever rulesets are the same in every locale, so the
 -- saved variables do not depend on the client language. This is what we show instead,
@@ -104,18 +106,23 @@ local function BuildIconStrings(iconSize)
     Neutral = "|A:honorsystem-portrait-neutral:" .. textIconSize .. ":" .. textIconSize * (50/52) .. "|a ",
   }
 
-  -- These icons are only available in retail.
-  if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then
+  -- These atlases are in retail and WoW Forever, but not in the Classic clients.
+  -- So we ask for them instead of deciding by the client.
+  if C_Texture.GetAtlasInfo("AllianceSymbol") then
     factionIcons["set1"] = {
       Alliance = "|A:AllianceSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
       Horde = "|A:HordeSymbol:" .. textIconSize .. ":" .. textIconSize .. "|a ",
       Neutral = "|A:CrossedFlags:" .. textIconSize .. ":" .. textIconSize .. "|a ",
     }
+  end
+  if C_Texture.GetAtlasInfo("nameplates-icon-flag-alliance") then
     factionIcons["set2"] = {
       Alliance = "|A:nameplates-icon-flag-alliance:" .. textIconSize .. ":" .. textIconSize .. "|a ",
       Horde = "|A:nameplates-icon-flag-horde:" .. textIconSize .. ":" .. textIconSize .. "|a ",
       Neutral = "|A:nameplates-icon-flag-neutral:" .. textIconSize .. ":" .. textIconSize .. "|a ",
     }
+  end
+  if C_Texture.GetAtlasInfo("Warfronts-BaseMapIcons-Alliance-Armory") then
     factionIcons["set3"] = {
       Alliance = "|A:Warfronts-BaseMapIcons-Alliance-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
       Horde = "|A:Warfronts-BaseMapIcons-Horde-Armory:" .. textIconSize .. ":" .. textIconSize * (37/35) .. "|a ",
@@ -1120,6 +1127,16 @@ function BrokerPlayedTime:PLAYER_LOGIN()
   -- Before copyTable() creates an empty entry for the full name.
   MigrateForeverFirstNameOnly(BrokerPlayedTimeDB)
   db = copyTable(defaults, BrokerPlayedTimeDB)
+
+  -- Sets 1 to 3 of the faction icons are only built where their atlases exist (see
+  -- BuildIconStrings()), which the Classic clients do not have. So if the saved
+  -- variables were copied over from another client's WTF folder, the chosen set might
+  -- not exist here, and the tooltip would raise a Lua error when indexing it. In that
+  -- case, fall back to the Battleground icons, which every client has. "None" is the
+  -- key false, which does exist, hence comparing with nil.
+  if factionIcons[db.factionIcons] == nil then
+    db.factionIcons = true
+  end
 
   RemoveDuplicates()
 
